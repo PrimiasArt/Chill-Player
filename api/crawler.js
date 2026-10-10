@@ -247,27 +247,22 @@ export default async function handler(req, res) {
     const action = urlObj.searchParams.get('action') || (req.body && req.body.action);
 
     if (action === 'probe') {
-      const candidates = [
-        'https://wikisach.net/',
-        'https://dtruyen.com/',
-        'https://truyenaudiocv.net/',
-        'https://truyentranh.net/',
-        'https://bachngocsach.net/',
-        'https://nettruyen.com/',
-        'https://tve-4u.org/',
-        'https://vlogtruyen.net/',
-        'https://doc-truyen.net/'
+      const tests = [
+        'https://dtruyen.com/tim-kiem/?q=dau+pha',
+        'https://dtruyen.com/dau-pha-thuong-khung/',
+        'https://dtruyen.com/dau-pha-thuong-khung/chuong-1/'
       ];
-      const resMap = {};
-      for (const c of candidates) {
+      const results = {};
+      for (const t of tests) {
         try {
-          const r = await fetch(c, { headers: BROWSER_HEADERS, signal: AbortSignal.timeout(4000) });
-          resMap[c] = { status: r.status, ok: r.ok };
+          const resp = await fetch(t, { headers: BROWSER_HEADERS, signal: AbortSignal.timeout(6000) });
+          const text = await resp.text();
+          results[t] = { status: resp.status, len: text.length, preview: text.slice(0, 150) };
         } catch(e) {
-          resMap[c] = { error: e.message };
+          results[t] = { error: e.message };
         }
       }
-      res.status(200).json({ success: true, resMap });
+      res.status(200).json({ success: true, results });
       return;
     }
 
