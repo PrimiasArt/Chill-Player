@@ -17,9 +17,11 @@ import {
   fetchStoryDetail, 
   fetchChapterContent,
   batchDownloadChapters,
+  generateStoryId,
   POPULAR_RECOMMENDED_STORIES,
   type CrawledStoryDetail
 } from '../services/crawler';
+import { db } from '../services/db';
 import type { CrawlSearchResult, Story, Chapter } from '../types';
 
 interface CrawlViewProps {
@@ -39,10 +41,13 @@ export const CrawlView: React.FC<CrawlViewProps> = ({
   const [storyDetail, setStoryDetail] = useState<CrawledStoryDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
 
-  // Chapter options
-  const [chapterCountChoice, setChapterCountChoice] = useState<number>(50);
-  const [customChapterCount, setCustomChapterCount] = useState<number>(50);
-  const [isCustomCount, setIsCustomCount] = useState(false);
+  // Existing local chapters in IndexedDB
+  const [existingLocalChapters, setExistingLocalChapters] = useState<Chapter[]>([]);
+
+  // Chapter range selection
+  const [fromChapter, setFromChapter] = useState<number>(1);
+  const [toChapter, setToChapter] = useState<number>(50);
+  const [skipExisting, setSkipExisting] = useState<boolean>(true);
 
   // Preview state
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
@@ -78,13 +83,26 @@ export const CrawlView: React.FC<CrawlViewProps> = ({
     setDetailError(null);
     setPreviewContent(null);
     setDownloadError(null);
+    setExistingLocalChapters([]);
 
     try {
-      const detail = await fetchStoryDetail(story.sourceUrl);
+      const storyId = generateStoryId(story.sourceUrl, story.title);
+      const [detail, localChs] = await Promise.all([
+        fetchStoryDetail(story.sourceUrl),
+        db.getStoryChapters(storyId).catch(() => [] as Chapter[])
+      ]);
+
       setStoryDetail(detail);
-      const initialCount = Math.min(50, detail.chapters.length || 50);
-      setChapterCountChoice(initialCount);
-      setCustomChapterCount(initialCount);
+      setExistingLocalChapters(localChs);
+
+      const maxLocal = localChs.length > 0 ? Math.max(...localChs.map(c => c.chapterNumber)) : 0;
+      const start = maxLocal > 0 ? maxLocal + 1 : 1;
+      const totalCh = detail.totalChapters || detail.chapters.length || 50;
+      const end = Math.min(totalCh, maxLocal > 0 ? maxLocal + 50 : 50);
+
+      setFromChapter(start);
+      setToChapter(Math.max(start, end));
+      setSkipExisting(true);
     } catch (err: any) {
       console.error('Cannot fetch story detail:', err);
       setDetailError(err.message || 'Không thể tải chi tiết truyện từ nguồn.');
@@ -115,8 +133,21 @@ export const CrawlView: React.FC<CrawlViewProps> = ({
   const handleDownloadAndSave = async () => {
     if (!storyDetail || storyDetail.chapters.length === 0) return;
 
-    const targetCount = isCustomCount ? Math.max(1, customChapterCount) : chapterCountChoice;
-    const targetChapters = storyDetail.chapters.slice(0, targetCount);
+    const start = Math.max(1, Math.min(fromChapter, toChapter));
+    const end = Math.min(storyDetail.chapters.length, Math.max(fromChapter, toChapter));
+
+    // Slice all chapters in selected range
+    const rangeChapters = storyDetail.chapters.slice(start - 1, end);
+
+    const existingSet = new Set(existingLocalChapters.map(c => c.chapterNumber));
+    const targetChapters = skipExisting
+      ? rangeChapters.filter(c => !existingSet.has(c.number))
+      : rangeChapters;
+
+    if (targetChapters.length === 0) {
+      alert(`Tất cả các chương từ ${start} đến ${end} đã có sẵn trong tủ sách của bạn!`);
+      return;
+    }
 
     setIsDownloading(true);
     setDownloadError(null);
@@ -127,18 +158,20 @@ export const CrawlView: React.FC<CrawlViewProps> = ({
         setDownloadProgress({ current: curr, total: tot, title });
       });
 
-      // Filter only successfully downloaded chapters with real text
-      const validChapters: Chapter[] = [];
-      const storyId = 'crawled_' + Date.now();
+      const storyId = generateStoryId(storyDetail.sourceUrl, storyDetail.title);
       const now = Date.now();
+      const validChapters: Chapter[] = [];
 
-      downloadedResults.forEach((res, idx) => {
+      downloadedResults.forEach((res) => {
         if (res.success && res.content && res.content.trim().length > 30) {
+          const chMeta = targetChapters.find(tc => tc.url === res.url);
+          const chNum = chMeta ? chMeta.number : 1;
+
           validChapters.push({
-            id: `${storyId}_ch_${idx + 1}`,
+            id: `${storyId}_ch_${chNum}`,
             storyId: storyId,
-            chapterNumber: idx + 1,
-            title: res.title || `Chương ${idx + 1}`,
+            chapterNumber: chNum,
+            title: res.title || chMeta?.title || `Chương ${chNum}`,
             content: res.content,
             wordCount: res.wordCount || res.content.split(/\s+/).length,
             sourceUrl: res.url
@@ -150,22 +183,23 @@ export const CrawlView: React.FC<CrawlViewProps> = ({
         throw new Error('Không thể tải được nội dung thực tế của các chương từ nguồn. Vui lòng thử lại sau.');
       }
 
+      const existingStory = await db.stories.get(storyId);
       const story: Story = {
         id: storyId,
         title: storyDetail.title,
         author: storyDetail.author,
-        coverUrl: storyDetail.coverUrl,
-        description: storyDetail.description || storyDetail.title,
+        coverUrl: storyDetail.coverUrl || existingStory?.coverUrl || '',
+        description: storyDetail.description || existingStory?.description || storyDetail.title,
         totalChapters: validChapters.length,
-        currentChapterNumber: 1,
-        currentProgressPercent: 0,
-        currentSentenceIndex: 0,
+        currentChapterNumber: existingStory?.currentChapterNumber || 1,
+        currentProgressPercent: existingStory?.currentProgressPercent || 0,
+        currentSentenceIndex: existingStory?.currentSentenceIndex || 0,
         source: 'crawler',
         sourceUrl: storyDetail.sourceUrl,
-        isFavorite: false,
+        isFavorite: existingStory?.isFavorite || false,
         tags: ['ONLINE', 'CRAWLER'],
-        lastReadAt: now,
-        createdAt: now
+        lastReadAt: existingStory?.lastReadAt || now,
+        createdAt: existingStory?.createdAt || now
       };
 
       setIsDownloading(false);
@@ -402,52 +436,179 @@ export const CrawlView: React.FC<CrawlViewProps> = ({
                     </div>
                   )}
 
-                  {/* Chapter Amount Selector */}
-                  <div className="space-y-2 pt-2">
-                    <label className="text-xs font-semibold text-zinc-200 block">
-                      Số lượng chương muốn tải về:
-                    </label>
-                    <div className="grid grid-cols-4 gap-2">
-                      {[10, 30, 50, 100].map((num) => (
-                        <button
-                          key={num}
-                          type="button"
-                          onClick={() => {
-                            setChapterCountChoice(num);
-                            setIsCustomCount(false);
-                          }}
-                          className={`py-2 px-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer text-center ${
-                            !isCustomCount && chapterCountChoice === num
-                              ? 'bg-amber-500 text-zinc-950 shadow-md'
-                              : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700/60'
-                          }`}
-                        >
-                          {num} chương
-                        </button>
-                      ))}
+                  {/* Existing Local Chapters Status */}
+                  {existingLocalChapters.length > 0 && (
+                    <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-3.5 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
+                          <CheckCircle2 className="w-4 h-4 shrink-0" />
+                          Đã có trong tủ sách: {existingLocalChapters.length} / {storyDetail.totalChapters} chương
+                        </span>
+                        <span className="text-[11px] text-zinc-400 font-medium">
+                          (Đã tải đến chương {Math.max(...existingLocalChapters.map(c => c.chapterNumber))})
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-zinc-400 leading-normal">
+                        Hệ thống đã tự động chọn tải tiếp từ chương mới. Vị trí đang đọc và đánh dấu của bạn sẽ được giữ nguyên!
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Chapter Range Selector */}
+                  <div className="space-y-3 pt-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-semibold text-zinc-200">
+                        Chọn khoảng chương tải về:
+                      </label>
+                      <span className="text-[11px] text-amber-400 font-medium">
+                        Tổng {storyDetail.totalChapters} chương có sẵn
+                      </span>
                     </div>
 
-                    <div className="flex items-center gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => setIsCustomCount(true)}
-                        className={`text-xs font-medium px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer ${
-                          isCustomCount ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'text-zinc-400 hover:text-zinc-200'
-                        }`}
-                      >
-                        Tùy chọn số lượng khác:
-                      </button>
-                      {isCustomCount && (
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1">
+                        <label className="text-[11px] text-zinc-400 mb-1 block">Từ chương:</label>
                         <input
                           type="number"
                           min={1}
-                          max={storyDetail.totalChapters || 1000}
-                          value={customChapterCount}
-                          onChange={(e) => setCustomChapterCount(parseInt(e.target.value) || 1)}
-                          className="w-24 bg-zinc-800 border border-amber-500/50 rounded-lg px-2.5 py-1 text-xs text-zinc-100 focus:outline-none"
+                          max={storyDetail.totalChapters}
+                          value={fromChapter}
+                          onChange={(e) => setFromChapter(Math.max(1, parseInt(e.target.value) || 1))}
+                          className="w-full bg-zinc-800 border border-zinc-700 focus:border-amber-500 rounded-xl px-3 py-2 text-xs text-zinc-100 font-semibold focus:outline-none"
                         />
+                      </div>
+
+                      <div className="pt-4 text-zinc-500 font-bold text-sm">→</div>
+
+                      <div className="flex-1">
+                        <label className="text-[11px] text-zinc-400 mb-1 block">Đến chương:</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={storyDetail.totalChapters}
+                          value={toChapter}
+                          onChange={(e) => setToChapter(Math.min(storyDetail.totalChapters, parseInt(e.target.value) || 1))}
+                          className="w-full bg-zinc-800 border border-zinc-700 focus:border-amber-500 rounded-xl px-3 py-2 text-xs text-zinc-100 font-semibold focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Quick Selection Buttons */}
+                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                      {existingLocalChapters.length > 0 ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const maxLocal = Math.max(...existingLocalChapters.map(c => c.chapterNumber));
+                              setFromChapter(maxLocal + 1);
+                              setToChapter(Math.min(storyDetail.totalChapters, maxLocal + 50));
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700/70 text-[11px] text-zinc-300 font-medium transition-colors cursor-pointer"
+                          >
+                            +50 chương tiếp
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const maxLocal = Math.max(...existingLocalChapters.map(c => c.chapterNumber));
+                              setFromChapter(maxLocal + 1);
+                              setToChapter(Math.min(storyDetail.totalChapters, maxLocal + 100));
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700/70 text-[11px] text-zinc-300 font-medium transition-colors cursor-pointer"
+                          >
+                            +100 chương tiếp
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const maxLocal = Math.max(...existingLocalChapters.map(c => c.chapterNumber));
+                              setFromChapter(maxLocal + 1);
+                              setToChapter(Math.min(storyDetail.totalChapters, maxLocal + 500));
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700/70 text-[11px] text-zinc-300 font-medium transition-colors cursor-pointer"
+                          >
+                            +500 chương tiếp
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const maxLocal = Math.max(...existingLocalChapters.map(c => c.chapterNumber));
+                              setFromChapter(maxLocal + 1);
+                              setToChapter(storyDetail.totalChapters);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-amber-500/40 text-[11px] text-amber-300 font-medium transition-colors cursor-pointer"
+                          >
+                            Tất cả còn lại
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          {[50, 100, 300, 500, 1000].map(count => (
+                            <button
+                              key={count}
+                              type="button"
+                              onClick={() => {
+                                setFromChapter(1);
+                                setToChapter(Math.min(storyDetail.totalChapters, count));
+                              }}
+                              className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700/70 text-[11px] text-zinc-300 font-medium transition-colors cursor-pointer"
+                            >
+                              {count} chương đầu
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFromChapter(1);
+                              setToChapter(storyDetail.totalChapters);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-amber-500/40 text-[11px] text-amber-300 font-medium transition-colors cursor-pointer"
+                          >
+                            Toàn bộ ({storyDetail.totalChapters} ch)
+                          </button>
+                        </>
                       )}
                     </div>
+
+                    {/* Skip existing chapters checkbox */}
+                    <div className="pt-1.5 space-y-1">
+                      <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-zinc-300">
+                        <input
+                          type="checkbox"
+                          checked={skipExisting}
+                          onChange={(e) => setSkipExisting(e.target.checked)}
+                          className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 bg-zinc-800 border-zinc-700"
+                        />
+                        <span>
+                          <strong className="text-zinc-200">Tự động bỏ qua chương đã tải</strong> (Tránh tải trùng dữ liệu)
+                        </span>
+                      </label>
+                      {!skipExisting && (
+                        <p className="text-[11px] text-amber-400/90 pl-6">
+                          ⚠️ Đang tắt bỏ qua: Hệ thống sẽ cào đè và cập nhật lại toàn bộ chương trong khoảng đã chọn.
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Estimated download calculation */}
+                    {(() => {
+                      const start = Math.max(1, Math.min(fromChapter, toChapter));
+                      const end = Math.min(storyDetail.chapters.length, Math.max(fromChapter, toChapter));
+                      const range = storyDetail.chapters.slice(start - 1, end);
+                      const existingSet = new Set(existingLocalChapters.map(c => c.chapterNumber));
+                      const toDownload = skipExisting ? range.filter(c => !existingSet.has(c.number)).length : range.length;
+                      const skipped = range.length - toDownload;
+
+                      return (
+                        <div className="text-[11px] text-zinc-400 bg-zinc-800/40 border border-zinc-700/50 p-2.5 rounded-xl flex items-center justify-between">
+                          <span>Sẽ tải: <strong className="text-amber-400 font-semibold">{toDownload}</strong> chương mới</span>
+                          {skipped > 0 && skipExisting && (
+                            <span className="text-emerald-400 font-medium">(Bỏ qua {skipped} chương đã có)</span>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Download Error */}
@@ -490,23 +651,39 @@ export const CrawlView: React.FC<CrawlViewProps> = ({
                 Đóng
               </button>
 
-              <button
-                onClick={handleDownloadAndSave}
-                disabled={isDownloading || isLoadingDetail || !storyDetail}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 font-bold text-xs transition-all shadow-md cursor-pointer"
-              >
-                {isDownloading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Đang lưu vào máy...
-                  </>
-                ) : (
-                  <>
-                    <Download className="w-4 h-4" />
-                    Tải {isCustomCount ? customChapterCount : chapterCountChoice} chương về tủ sách
-                  </>
-                )}
-              </button>
+              {(() => {
+                if (!storyDetail) return null;
+                const start = Math.max(1, Math.min(fromChapter, toChapter));
+                const end = Math.min(storyDetail.chapters.length, Math.max(fromChapter, toChapter));
+                const range = storyDetail.chapters.slice(start - 1, end);
+                const existingSet = new Set(existingLocalChapters.map(c => c.chapterNumber));
+                const toDownload = skipExisting ? range.filter(c => !existingSet.has(c.number)).length : range.length;
+
+                return (
+                  <button
+                    onClick={handleDownloadAndSave}
+                    disabled={isDownloading || isLoadingDetail || !storyDetail || toDownload === 0}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 font-bold text-xs transition-all shadow-md cursor-pointer"
+                  >
+                    {isDownloading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Đang lưu vào máy...
+                      </>
+                    ) : toDownload === 0 ? (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        Đã có đủ các chương này
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-4 h-4" />
+                        Tải {toDownload} chương về tủ sách
+                      </>
+                    )}
+                  </button>
+                );
+              })()}
             </div>
           </div>
         </div>

@@ -255,7 +255,7 @@ async function handleStoryDetail(storyUrl) {
     }
 
     const chapters = [];
-    for (let i = 1; i <= Math.min(totalChapters, 2500); i++) {
+    for (let i = 1; i <= Math.min(totalChapters, 15000); i++) {
       if (knownChapters.has(i)) {
         chapters.push(knownChapters.get(i));
       } else {

@@ -24,6 +24,14 @@ const API_BASE = (typeof window !== 'undefined' && window.location.origin.starts
   ? '' 
   : 'https://chill-reader.vercel.app';
 
+export function generateStoryId(sourceUrl: string, title: string): string {
+  const cleanUrl = sourceUrl.split('?')[0].replace(/\/+$/, '');
+  const lastPart = cleanUrl.split('/').pop() || '';
+  const slug = lastPart.replace(/[^\w-]/g, '_').toLowerCase();
+  if (slug && slug.length >= 3) return `crawled_${slug}`;
+  return `crawled_${title.toLowerCase().trim().replace(/[^\w-]/g, '_')}`;
+}
+
 /**
  * Curated popular Vietnamese novels with working real sources
  */

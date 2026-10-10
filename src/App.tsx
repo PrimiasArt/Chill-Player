@@ -200,14 +200,48 @@ export const App: React.FC = () => {
   };
 
   const handleImportComplete = async (story: Story, chapters: Chapter[]) => {
+    let finalStory: Story = story;
     await db.transaction('rw', db.stories, db.chapters, async () => {
-      await db.stories.add(story);
-      await db.chapters.bulkAdd(chapters);
+      const existing = await db.stories.get(story.id);
+      if (existing) {
+        const existingChapters = await db.getStoryChapters(story.id);
+        const allDistinctNumbers = new Set([
+          ...existingChapters.map(c => c.chapterNumber),
+          ...chapters.map(c => c.chapterNumber)
+        ]);
+
+        finalStory = {
+          ...existing,
+          title: story.title || existing.title,
+          coverUrl: story.coverUrl || existing.coverUrl,
+          totalChapters: allDistinctNumbers.size,
+          sourceUrl: story.sourceUrl || existing.sourceUrl,
+          // Preserve user reading progress so reading position is kept!
+          currentChapterNumber: existing.currentChapterNumber || 1,
+          currentProgressPercent: existing.currentProgressPercent || 0,
+          currentSentenceIndex: existing.currentSentenceIndex || 0,
+          lastReadAt: Date.now()
+        };
+        await db.stories.put(finalStory);
+      } else {
+        await db.stories.put(story);
+      }
+      await db.chapters.bulkPut(chapters);
     });
-    setStories(prev => [story, ...prev]);
-    supabaseSync.pushStoryProgress(story);
-    // Immediately open the newly imported story
-    handleOpenStory(story, 'read');
+
+    setStories(prev => {
+      const idx = prev.findIndex(s => s.id === finalStory.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = finalStory;
+        return next;
+      }
+      return [finalStory, ...prev];
+    });
+
+    supabaseSync.pushStoryProgress(finalStory);
+    // Immediately open the newly imported or updated story
+    handleOpenStory(finalStory, 'read');
   };
 
   const handleUpdateReaderSettings = async (newSettings: Partial<ReaderSettings>) => {
