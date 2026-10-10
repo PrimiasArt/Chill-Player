@@ -1,0 +1,16 @@
+{
+  "appId": "com.chillreader.app",
+  "appName": "Chill Reader",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1500,
+      "backgroundColor": "#09090b"
+    }
+  }
+}
