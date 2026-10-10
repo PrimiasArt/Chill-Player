@@ -67,11 +67,12 @@ jobs:
           body: |
             ## 📱 Bản cài đặt Android APK (Chill Reader)
             - **Phiên bản:** Mới nhất (Capacitor Android)
-            - **Tính năng mới:**
-              - Đọc và nghe Audio TTS đa giọng (Nam Minh AI, Hoài My AI, Google).
-              - Tự động bỏ qua chương đã tải, cào truyện lên đến 15.000+ chương.
-              - Tìm kiếm và nút "Đi nhanh" tới số chương trong Mục lục.
-              - Sửa triệt để lỗi nhảy câu và lặp câu khi đọc audio.
+            - **Tính năng mới & Sửa lỗi quan trọng:**
+              - 🔊 **Audio TTS trên Android APK:** Sửa lỗi không phát được âm thanh trong app, cấp quyền âm thanh nền và mở khóa tự động phát liên tục qua từng câu.
+              - ☁️ **Đồng bộ Supabase 2 chiều toàn diện:** Xóa truyện là xóa vĩnh viễn trên Cloud (không bị kéo lại truyện đã xóa), hỗ trợ đồng bộ toàn bộ nội dung chữ của các chương (`user_chapters`).
+              - 📥 **Nút tải chương 1-click:** Khi mở truyện đồng bộ trên điện thoại chưa có chữ, người dùng có thể tải ngay từ Supabase Cloud hoặc tải trực tiếp từ nguồn web online.
+              - 🎧 Đọc và nghe Audio TTS đa giọng (Nam Minh AI, Hoài My AI, Google).
+              - ⚡ Tìm kiếm và nút "Đi nhanh" tới số chương trong Mục lục.
             
             👉 Tải file **`ChillReader-v1.0.apk`** bên dưới và cài đặt trực tiếp vào điện thoại Android.
           files: ChillReader-v1.0.apk

@@ -197,6 +197,7 @@ export const App: React.FC = () => {
     }
     await db.deleteStoryWithChapters(storyId);
     setStories(prev => prev.filter(s => s.id !== storyId));
+    await supabaseSync.deleteStory(storyId);
   };
 
   const handleImportComplete = async (story: Story, chapters: Chapter[]) => {
@@ -239,9 +240,21 @@ export const App: React.FC = () => {
       return [finalStory, ...prev];
     });
 
+    await supabaseSync.unmarkDeletedStory(finalStory.id);
     supabaseSync.pushStoryProgress(finalStory);
+    supabaseSync.pushStoryChapters(finalStory.id, chapters);
     // Immediately open the newly imported or updated story
     handleOpenStory(finalStory, 'read');
+  };
+
+  const handleReloadActiveStoryChapters = async () => {
+    if (!activeStory) return;
+    const chs = await db.getStoryChapters(activeStory.id);
+    setActiveStoryChapters(chs);
+    if (chs.length > 0) {
+      const targetChapter = chs.find(c => c.chapterNumber === currentChapterNumber) || chs[0];
+      setCurrentChapterNumber(targetChapter.chapterNumber);
+    }
   };
 
   const handleUpdateReaderSettings = async (newSettings: Partial<ReaderSettings>) => {
@@ -272,6 +285,7 @@ export const App: React.FC = () => {
             setActiveStory(null);
             loadLibrary();
           }}
+          onReloadChapters={handleReloadActiveStoryChapters}
           settings={readerSettings}
           onUpdateSettings={handleUpdateReaderSettings}
           ttsState={ttsState}

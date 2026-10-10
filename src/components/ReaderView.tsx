@@ -10,10 +10,18 @@ import {
   Check, 
   X,
   Search,
-  Zap
+  Zap,
+  CloudDownload,
+  Download,
+  BookOpen,
+  Loader2,
+  AlertCircle
 } from 'lucide-react';
 import type { Story, Chapter, ReaderSettings, ReaderTheme, FontFamily } from '../types';
 import { ttsEngine, type TTSState } from '../services/tts/ttsEngine';
+import { supabaseSync } from '../services/sync/supabaseSync';
+import { fetchStoryDetail, batchDownloadChapters } from '../services/crawler';
+import { db } from '../services/db';
 
 interface ReaderViewProps {
   story: Story;
@@ -27,6 +35,7 @@ interface ReaderViewProps {
   onStartTTS: () => void;
   onToggleTTS: () => void;
   activeSentenceIndex: number;
+  onReloadChapters?: () => Promise<void>;
 }
 
 export const ReaderView: React.FC<ReaderViewProps> = ({
@@ -40,7 +49,8 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   ttsState,
   onStartTTS,
   onToggleTTS,
-  activeSentenceIndex
+  activeSentenceIndex,
+  onReloadChapters
 }) => {
   const currentChapter = chapters.find(c => c.chapterNumber === currentChapterNumber) || chapters[0];
   
@@ -52,6 +62,101 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   // Quick jump & TOC search states
   const [tocSearch, setTocSearch] = useState('');
   const [quickJumpInput, setQuickJumpInput] = useState('');
+
+  // On-demand download state for empty chapters
+  const [isDownloadingChapters, setIsDownloadingChapters] = useState(false);
+  const [downloadStatus, setDownloadStatus] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  const handlePullFromCloud = async () => {
+    setIsDownloadingChapters(true);
+    setDownloadStatus('Đang kết nối Supabase Cloud để tải chương...');
+    setDownloadError(null);
+    try {
+      if (!supabaseSync.isConnected()) {
+        throw new Error('Chưa kết nối Supabase. Vui lòng vào Cài đặt để thiết lập tài khoản Supabase.');
+      }
+      const count = await supabaseSync.pullStoryChapters(story.id);
+      if (count > 0) {
+        setDownloadStatus(`Đã tải thành công ${count} chương từ đám mây!`);
+        if (onReloadChapters) {
+          await onReloadChapters();
+        }
+      } else {
+        setDownloadError('Không tìm thấy nội dung chương của truyện này trên Supabase Cloud. (Có thể máy tính chưa tạo bảng user_chapters hoặc chưa đồng bộ lên).');
+      }
+    } catch (err: any) {
+      setDownloadError(err?.message || 'Lỗi khi tải chương từ Supabase');
+    } finally {
+      setIsDownloadingChapters(false);
+    }
+  };
+
+  const handleDownloadFromOnlineSource = async () => {
+    if (!story.sourceUrl) {
+      setDownloadError('Truyện này không có liên kết nguồn web để tải tự động.');
+      return;
+    }
+
+    setIsDownloadingChapters(true);
+    setDownloadStatus('Đang lấy danh mục chương từ nguồn web...');
+    setDownloadError(null);
+
+    try {
+      const detail = await fetchStoryDetail(story.sourceUrl);
+      if (!detail.chapters || detail.chapters.length === 0) {
+        throw new Error('Không lấy được danh sách chương từ nguồn web này.');
+      }
+
+      const targetCount = Math.min(detail.chapters.length, 50);
+      const chaptersToDownload = detail.chapters.slice(0, targetCount);
+
+      setDownloadStatus(`Đang tải 1-${targetCount} chương từ nguồn online...`);
+
+      const results = await batchDownloadChapters(
+        chaptersToDownload.map((c, i) => ({ title: c.title, url: c.url, number: c.number || (i + 1) })),
+        (cur, tot, t) => {
+          setDownloadStatus(`Đang tải chương ${cur}/${tot}: ${t || ''}`);
+        }
+      );
+
+      const successfulChapters: Chapter[] = [];
+      results.forEach((r, idx) => {
+        if (r.success && r.content) {
+          successfulChapters.push({
+            id: `${story.id}_ch_${idx + 1}`,
+            storyId: story.id,
+            chapterNumber: idx + 1,
+            title: r.title || `Chương ${idx + 1}`,
+            content: r.content,
+            wordCount: r.wordCount || 0,
+            sourceUrl: r.url
+          });
+        }
+      });
+
+      if (successfulChapters.length === 0) {
+        throw new Error('Không tải được nội dung của chương nào. Vui lòng kiểm tra lại kết nối mạng.');
+      }
+
+      await db.chapters.bulkPut(successfulChapters);
+      await db.stories.update(story.id, {
+        totalChapters: detail.totalChapters || successfulChapters.length
+      });
+
+      // Also push to Supabase if connected
+      await supabaseSync.pushStoryChapters(story.id, successfulChapters);
+
+      setDownloadStatus(`Đã tải xong ${successfulChapters.length} chương!`);
+      if (onReloadChapters) {
+        await onReloadChapters();
+      }
+    } catch (err: any) {
+      setDownloadError(err?.message || 'Lỗi khi tải chương từ nguồn web');
+    } finally {
+      setIsDownloadingChapters(false);
+    }
+  };
 
   const containerRef = useRef<HTMLDivElement>(null);
   const sentenceRefs = useRef<(HTMLSpanElement | null)[]>([]);
@@ -228,21 +333,25 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
           <div className="flex items-center gap-1.5 shrink-0">
             {/* TTS Toggle Button */}
             <button
+              disabled={chapters.length === 0}
               onClick={() => {
+                if (chapters.length === 0) return;
                 if (ttsState === 'idle') {
                   onStartTTS();
                 } else {
                   onToggleTTS();
                 }
               }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all cursor-pointer ${
-                ttsState === 'playing'
-                  ? 'bg-amber-500 text-zinc-950 font-bold shadow-md shadow-amber-500/30'
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
+                chapters.length === 0
+                  ? 'opacity-40 cursor-not-allowed bg-zinc-800 text-zinc-500 border border-zinc-700'
+                  : ttsState === 'playing'
+                  ? 'bg-amber-500 text-zinc-950 font-bold shadow-md shadow-amber-500/30 cursor-pointer'
                   : ttsState === 'paused'
-                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                  : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700'
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 cursor-pointer'
+                  : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 cursor-pointer'
               }`}
-              title="Nghe audio chương này"
+              title={chapters.length === 0 ? 'Chưa có nội dung để đọc audio' : 'Nghe audio chương này'}
             >
               <Headphones className="w-3.5 h-3.5" />
               <span>{ttsState === 'playing' ? 'Đang nghe' : (ttsState === 'paused' ? 'Tạm dừng' : 'Nghe audio')}</span>
@@ -250,8 +359,11 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
 
             {/* Table of contents */}
             <button
+              disabled={chapters.length === 0}
               onClick={() => setShowTocDrawer(true)}
-              className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors cursor-pointer"
+              className={`p-2 rounded-lg text-zinc-400 transition-colors ${
+                chapters.length === 0 ? 'opacity-40 cursor-not-allowed' : 'hover:bg-zinc-800 hover:text-zinc-100 cursor-pointer'
+              }`}
               title="Mục lục chương"
             >
               <List className="w-5 h-5" />
@@ -269,85 +381,155 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
         </div>
       </div>
 
-      {/* Main Reading Text Area */}
-      <main 
-        ref={containerRef}
-        onClick={() => setShowControls(!showControls)}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        className="flex-1 max-w-3xl mx-auto w-full px-5 sm:px-8 py-20 transition-all select-text cursor-default"
-        style={{
-          ...getFontFamilyStyle(settings.fontFamily),
-          fontSize: `${settings.fontSize}px`,
-          lineHeight: settings.lineHeight,
-          letterSpacing: `${settings.letterSpacing}px`
-        }}
-      >
-        {/* Chapter Title Heading */}
-        <div className="mb-10 pb-4 border-b border-current opacity-20 text-center">
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight mb-2">
-            {currentChapter?.title}
-          </h1>
-          <p className="text-xs opacity-60">
-            {story.title} • {story.author}
-          </p>
-        </div>
+      {/* Main Reading Text Area or Empty State */}
+      {chapters.length === 0 ? (
+        <main className="flex-1 max-w-xl mx-auto w-full px-5 py-20 flex flex-col items-center justify-center text-center">
+          <div className="w-24 h-32 rounded-xl overflow-hidden shadow-2xl border border-zinc-700/60 mb-5 bg-zinc-900 shrink-0">
+            {story.coverUrl ? (
+              <img src={story.coverUrl} alt={story.title} className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-zinc-600">
+                <BookOpen className="w-10 h-10" />
+              </div>
+            )}
+          </div>
 
-        {/* Text Sentences */}
-        <div className="space-y-4">
-          {sentences.map((sentence, idx) => {
-            const isActive = ttsState !== 'idle' && idx === activeSentenceIndex;
-            return (
-              <span
-                key={idx}
-                ref={(el) => { sentenceRefs.current[idx] = el; }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleSentenceClick(idx);
-                }}
-                className={`inline-block mr-1 rounded px-0.5 transition-colors cursor-pointer hover:bg-amber-500/10 ${
-                  isActive ? 'tts-highlight font-medium' : ''
-                }`}
+          <h2 className="text-lg sm:text-xl font-bold mb-1 text-zinc-100">{story.title}</h2>
+          <p className="text-xs text-zinc-400 mb-6">{story.author} • {story.totalChapters ? `${story.totalChapters} chương` : 'Chưa có chương'}</p>
+
+          <div className="w-full bg-zinc-900/90 border border-zinc-800 rounded-2xl p-6 shadow-xl space-y-4">
+            <div className="flex items-center justify-center gap-2 text-amber-400 font-semibold text-sm">
+              <AlertCircle className="w-4 h-4" />
+              Chưa có nội dung chữ trên thiết bị này
+            </div>
+            <p className="text-xs text-zinc-400 leading-relaxed">
+              Truyện đã được đồng bộ danh mục, nhưng nội dung chi tiết của các chương chưa được tải về máy. Bạn có thể tải ngay dưới đây:
+            </p>
+
+            {downloadStatus && (
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-center gap-2 text-left">
+                {isDownloadingChapters ? <Loader2 className="w-4 h-4 shrink-0 animate-spin text-amber-400" /> : <Check className="w-4 h-4 shrink-0 text-emerald-400" />}
+                <span className="truncate">{downloadStatus}</span>
+              </div>
+            )}
+
+            {downloadError && (
+              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-xs flex items-center gap-2 text-left">
+                <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+                <span>{downloadError}</span>
+              </div>
+            )}
+
+            <div className="pt-2 space-y-2.5">
+              <button
+                onClick={handlePullFromCloud}
+                disabled={isDownloadingChapters}
+                className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-98 disabled:opacity-50 text-zinc-950 font-semibold text-xs transition-all shadow-lg shadow-amber-500/20 cursor-pointer"
               >
-                {sentence}{' '}
-              </span>
-            );
-          })}
-        </div>
+                {isDownloadingChapters ? <Loader2 className="w-4 h-4 animate-spin" /> : <CloudDownload className="w-4 h-4" />}
+                Tải nội dung chương từ Supabase Cloud
+              </button>
 
-        {/* Chapter Bottom Navigation */}
-        <div className="mt-16 pt-8 border-t border-current opacity-20 flex items-center justify-between gap-4">
-          <button
-            disabled={currentChapterNumber <= 1}
-            onClick={(e) => {
-              e.stopPropagation();
-              onSelectChapter(currentChapterNumber - 1);
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-current opacity-80 hover:opacity-100 text-zinc-950 font-medium text-xs disabled:opacity-20 cursor-pointer"
-          >
-            <ChevronLeft className="w-4 h-4" />
-            Chương trước
-          </button>
+              {story.sourceUrl && (
+                <button
+                  onClick={handleDownloadFromOnlineSource}
+                  disabled={isDownloadingChapters}
+                  className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 active:scale-98 disabled:opacity-50 text-zinc-200 border border-zinc-700 font-medium text-xs transition-all cursor-pointer"
+                >
+                  {isDownloadingChapters ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4 text-amber-400" />}
+                  Tải các chương từ nguồn web online
+                </button>
+              )}
 
-          <span className="text-xs opacity-75 font-medium">
-            {currentChapterNumber} / {chapters.length}
-          </span>
+              <button
+                onClick={onBackToLibrary}
+                className="w-full py-2.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
+              >
+                Quay lại Thư viện
+              </button>
+            </div>
+          </div>
+        </main>
+      ) : (
+        <main 
+          ref={containerRef}
+          onClick={() => setShowControls(!showControls)}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          className="flex-1 max-w-3xl mx-auto w-full px-5 sm:px-8 py-20 transition-all select-text cursor-default"
+          style={{
+            ...getFontFamilyStyle(settings.fontFamily),
+            fontSize: `${settings.fontSize}px`,
+            lineHeight: settings.lineHeight,
+            letterSpacing: `${settings.letterSpacing}px`
+          }}
+        >
+          {/* Chapter Title Heading */}
+          <div className="mb-10 pb-4 border-b border-current opacity-20 text-center">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight mb-2">
+              {currentChapter?.title}
+            </h1>
+            <p className="text-xs opacity-60">
+              {story.title} • {story.author}
+            </p>
+          </div>
 
-          <button
-            disabled={currentChapterNumber >= chapters.length}
-            onClick={(e) => {
-              e.stopPropagation();
-              onSelectChapter(currentChapterNumber + 1);
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-current opacity-80 hover:opacity-100 text-zinc-950 font-medium text-xs disabled:opacity-20 cursor-pointer"
-          >
-            Chương sau
-            <ChevronRight className="w-4 h-4" />
-          </button>
-        </div>
-      </main>
+          {/* Text Sentences */}
+          <div className="space-y-4">
+            {sentences.map((sentence, idx) => {
+              const isActive = ttsState !== 'idle' && idx === activeSentenceIndex;
+              return (
+                <span
+                  key={idx}
+                  ref={(el) => { sentenceRefs.current[idx] = el; }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleSentenceClick(idx);
+                  }}
+                  className={`inline-block mr-1 rounded px-0.5 transition-colors cursor-pointer hover:bg-amber-500/10 ${
+                    isActive ? 'tts-highlight font-medium' : ''
+                  }`}
+                >
+                  {sentence}{' '}
+                </span>
+              );
+            })}
+          </div>
+
+          {/* Chapter Bottom Navigation */}
+          <div className="mt-16 pt-8 border-t border-current opacity-20 flex items-center justify-between gap-4">
+            <button
+              disabled={currentChapterNumber <= 1}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectChapter(currentChapterNumber - 1);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-current opacity-80 hover:opacity-100 text-zinc-950 font-medium text-xs disabled:opacity-20 cursor-pointer"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              Chương trước
+            </button>
+
+            <span className="text-xs opacity-75 font-medium">
+              {currentChapterNumber} / {chapters.length}
+            </span>
+
+            <button
+              disabled={currentChapterNumber >= chapters.length}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectChapter(currentChapterNumber + 1);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-current opacity-80 hover:opacity-100 text-zinc-950 font-medium text-xs disabled:opacity-20 cursor-pointer"
+            >
+              Chương sau
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </main>
+      )}
 
       {/* Reader Settings Modal */}
       {showSettingsModal && (

@@ -19,10 +19,7 @@ export interface FetchedChapterResult {
   error?: string;
 }
 
-// In Capacitor mobile app, origin is capacitor://localhost so use production Vercel API
-const API_BASE = (typeof window !== 'undefined' && window.location.origin.startsWith('http')) 
-  ? '' 
-  : 'https://chill-reader.vercel.app';
+import { getApiBase } from '../apiConfig';
 
 export function generateStoryId(sourceUrl: string, title: string): string {
   const cleanUrl = sourceUrl.split('?')[0].replace(/\/+$/, '');
@@ -86,7 +83,7 @@ export async function searchStories(keyword: string): Promise<CrawlSearchResult[
   if (!trimmed) return POPULAR_RECOMMENDED_STORIES;
 
   try {
-    const res = await fetch(`${API_BASE}/api/crawler?action=search&q=${encodeURIComponent(trimmed)}`, {
+    const res = await fetch(`${getApiBase()}/api/crawler?action=search&q=${encodeURIComponent(trimmed)}`, {
       signal: AbortSignal.timeout(10000)
     });
 
@@ -114,7 +111,7 @@ export async function searchStories(keyword: string): Promise<CrawlSearchResult[
  * Fetch story details & chapter list
  */
 export async function fetchStoryDetail(storyUrl: string): Promise<CrawledStoryDetail> {
-  const res = await fetch(`${API_BASE}/api/crawler?action=detail&url=${encodeURIComponent(storyUrl)}`, {
+  const res = await fetch(`${getApiBase()}/api/crawler?action=detail&url=${encodeURIComponent(storyUrl)}`, {
     signal: AbortSignal.timeout(12000)
   });
 
@@ -134,7 +131,7 @@ export async function fetchStoryDetail(storyUrl: string): Promise<CrawledStoryDe
  * Fetch a single chapter's content
  */
 export async function fetchChapterContent(chapterUrl: string): Promise<{ title: string; content: string; wordCount: number }> {
-  const res = await fetch(`${API_BASE}/api/crawler?action=chapter&url=${encodeURIComponent(chapterUrl)}`, {
+  const res = await fetch(`${getApiBase()}/api/crawler?action=chapter&url=${encodeURIComponent(chapterUrl)}`, {
     signal: AbortSignal.timeout(12000)
   });
 
@@ -167,7 +164,7 @@ export async function batchDownloadChapters(
 
     try {
       // Try batch endpoint first
-      const res = await fetch(`${API_BASE}/api/crawler`, {
+      const res = await fetch(`${getApiBase()}/api/crawler`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'batch', urls: chunkUrls }),

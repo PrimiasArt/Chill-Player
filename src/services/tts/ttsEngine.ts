@@ -49,10 +49,9 @@ export const CURATED_VOICES: VoiceOption[] = [
   }
 ];
 
-// In Capacitor mobile app, origin is capacitor://localhost so use production Vercel API
-const API_BASE = (typeof window !== 'undefined' && window.location.origin.startsWith('http')) 
-  ? '' 
-  : 'https://chill-reader.vercel.app';
+import { getApiBase } from '../apiConfig';
+
+const getTtsApiBase = () => getApiBase();
 
 class TTSEngine {
   private synth: SpeechSynthesis | null = null;
@@ -181,7 +180,7 @@ class TTSEngine {
     }
 
     if (this.isOnlineVoice(voiceURI)) {
-      const url = `${API_BASE}/api/tts?voice=${encodeURIComponent(voiceURI)}&rate=${this.settings.rate}&pitch=${this.settings.pitch}&text=${encodeURIComponent(sampleText)}`;
+      const url = `${getTtsApiBase()}/api/tts?voice=${encodeURIComponent(voiceURI)}&rate=${this.settings.rate}&pitch=${this.settings.pitch}&text=${encodeURIComponent(sampleText)}`;
       this.testAudio = new Audio(url);
       await this.testAudio.play();
     } else {
@@ -360,7 +359,7 @@ class TTSEngine {
     this.fetchingSentences.add(index);
     const sentence = this.sentences[index];
     const voice = this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural';
-    const url = `${API_BASE}/api/tts?voice=${encodeURIComponent(voice)}&rate=${this.settings.rate}&pitch=${this.settings.pitch}&text=${encodeURIComponent(sentence)}`;
+    const url = `${getTtsApiBase()}/api/tts?voice=${encodeURIComponent(voice)}&rate=${this.settings.rate}&pitch=${this.settings.pitch}&text=${encodeURIComponent(sentence)}`;
 
     fetch(url)
       .then(res => {
@@ -451,7 +450,7 @@ class TTSEngine {
       } else {
         // Fetch audio directly
         const voice = this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural';
-        const audioUrl = `${API_BASE}/api/tts?voice=${encodeURIComponent(voice)}&rate=${this.settings.rate}&pitch=${this.settings.pitch}&text=${encodeURIComponent(sentence)}`;
+        const audioUrl = `${getTtsApiBase()}/api/tts?voice=${encodeURIComponent(voice)}&rate=${this.settings.rate}&pitch=${this.settings.pitch}&text=${encodeURIComponent(sentence)}`;
         player.src = audioUrl;
         player.play().catch(err => {
           if (currentToken !== this.playbackToken || this.state !== 'playing') return;

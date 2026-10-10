@@ -200,7 +200,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
-  const sqlSchemaText = `-- Tạo bảng lưu tủ truyện và tiến độ đọc đồng bộ đa thiết bị
+  const sqlSchemaText = `-- 1. Bảng lưu tủ truyện và tiến độ đọc đồng bộ đa thiết bị
 create table if not exists user_stories (
   id text primary key,
   user_id text not null,
@@ -213,14 +213,35 @@ create table if not exists user_stories (
   current_progress_percent float default 0,
   current_sentence_index int default 0,
   source text,
+  source_url text,
   is_favorite boolean default false,
   last_read_at bigint,
   created_at bigint
 );
 
--- Tắt RLS để bạn dùng cá nhân qua Anon Key đơn giản nhất
+-- Bổ sung cột source_url nếu bảng user_stories đã được tạo trước đó
+alter table user_stories add column if not exists source_url text;
+
+-- 2. Bảng lưu nội dung chữ của các chương truyện
+create table if not exists user_chapters (
+  id text primary key,
+  story_id text not null references user_stories(id) on delete cascade,
+  chapter_number int not null,
+  title text,
+  content text,
+  word_count int default 0,
+  source_url text,
+  created_at bigint
+);
+
+-- 3. Phân quyền bảo mật RLS để bạn dùng cá nhân qua Anon Key đơn giản nhất
 alter table user_stories enable row level security;
-create policy "Allow all personal operations" on user_stories for all using (true);`;
+drop policy if exists "Allow all personal operations on stories" on user_stories;
+create policy "Allow all personal operations on stories" on user_stories for all using (true);
+
+alter table user_chapters enable row level security;
+drop policy if exists "Allow all personal operations on chapters" on user_chapters;
+create policy "Allow all personal operations on chapters" on user_chapters for all using (true);`;
 
   const copySqlToClipboard = () => {
     navigator.clipboard.writeText(sqlSchemaText);
