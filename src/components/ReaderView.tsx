@@ -501,7 +501,9 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
             {/* Header */}
             <div className="flex items-center justify-between pb-3 border-b border-zinc-800 mb-3">
               <div className="flex items-center gap-2 min-w-0">
-                <List className="w-5 h-5 text-amber-400 shrink-0" />
+                <div className="w-5 h-5 rounded overflow-hidden bg-white p-0.5 border border-zinc-700/60 shrink-0 flex items-center justify-center">
+                  <img src="/icon-192.png" alt="NKI Logo" className="w-full h-full object-contain" />
+                </div>
                 <h3 className="font-semibold text-sm text-zinc-100 truncate">
                   Mục lục ({chapters.length.toLocaleString('vi-VN')} chương)
                 </h3>

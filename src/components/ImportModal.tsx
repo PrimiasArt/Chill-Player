@@ -1,7 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { 
   X, 
-  Upload, 
   Book, 
   AlertTriangle, 
   CheckCircle2, 
@@ -134,8 +133,10 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       >
         {/* Header */}
         <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Upload className="w-5 h-5 text-amber-400" />
+          <div className="flex items-center gap-2.5">
+            <div className="w-6 h-6 rounded-md overflow-hidden bg-white p-0.5 border border-zinc-700/60 shadow-xs shrink-0 flex items-center justify-center">
+              <img src="/icon-192.png" alt="NKI Logo" className="w-full h-full object-contain" />
+            </div>
             <h2 className="font-semibold text-zinc-100">Nạp file truyện vào Chill Reader</h2>
           </div>
           <button

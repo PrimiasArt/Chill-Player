@@ -27,16 +27,20 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={() => onSelectTab('library')}
           className="flex items-center gap-2.5 cursor-pointer hover:opacity-90 transition-opacity"
         >
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-600 via-amber-500 to-yellow-400 flex items-center justify-center shadow-lg shadow-amber-500/20">
-            <BookOpen className="w-5 h-5 text-zinc-950 font-bold" />
+          <div className="w-10 h-10 rounded-xl overflow-hidden border border-zinc-700/60 shadow-md shadow-emerald-500/10 shrink-0 bg-white flex items-center justify-center p-0.5">
+            <img 
+              src="/icon-192.png" 
+              alt="Chill Reader NKI" 
+              className="w-full h-full object-contain rounded-lg"
+            />
           </div>
           <div>
             <div className="flex items-center gap-1.5">
-              <span className="font-bold text-lg tracking-tight bg-gradient-to-r from-zinc-100 via-amber-100 to-amber-400 bg-clip-text text-transparent">
+              <span className="font-bold text-lg tracking-tight bg-gradient-to-r from-zinc-100 via-emerald-100 to-emerald-400 bg-clip-text text-transparent">
                 Chill Reader
               </span>
-              <span className="text-[10px] uppercase font-semibold tracking-wider px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                Audio & Book
+              <span className="text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                NKI Ecosystem
               </span>
             </div>
             <p className="text-[11px] text-zinc-400 hidden sm:block">Đọc & Nghe truyện thông minh</p>

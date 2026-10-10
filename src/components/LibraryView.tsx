@@ -132,8 +132,8 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       {/* Stories Grid */}
       {filteredStories.length === 0 ? (
         <div className="bg-zinc-800/40 border border-dashed border-zinc-800 rounded-2xl p-12 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-400 flex items-center justify-center mx-auto mb-4 border border-amber-500/20">
-            <BookOpen className="w-8 h-8" />
+          <div className="w-16 h-16 rounded-2xl bg-white p-1 border border-zinc-700/60 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-emerald-500/10">
+            <img src="/icon-192.png" alt="Chill Reader NKI" className="w-full h-full object-contain rounded-xl" />
           </div>
           <h3 className="text-lg font-semibold text-zinc-200 mb-1">
             {searchQuery ? 'Không tìm thấy truyện phù hợp' : 'Tủ sách của bạn còn trống'}

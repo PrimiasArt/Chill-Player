@@ -1,6 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { 
-  Settings, 
   Download, 
   Upload, 
   Trash2, 
@@ -90,7 +89,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       const res = await supabaseSync.testConnection(cloudConfig.url, cloudConfig.anonKey);
       setTestResult(res);
       if (res.success) {
-        await supabaseSync.updateConfig({ ...cloudConfig, enabled: true });
+        const newCfg = { ...cloudConfig, enabled: true };
+        await supabaseSync.updateConfig(newCfg);
+        setCloudConfig(newCfg);
       }
     } finally {
       setIsTesting(false);
@@ -98,23 +99,36 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   const handleSaveCloudConfig = async () => {
-    await supabaseSync.updateConfig(cloudConfig);
+    if (!cloudConfig.url || !cloudConfig.anonKey) {
+      alert('Vui lòng nhập Supabase Project URL và Anon Key.');
+      return;
+    }
+    const newCfg = { ...cloudConfig, enabled: true };
+    await supabaseSync.updateConfig(newCfg);
+    setCloudConfig(newCfg);
     alert('Đã lưu cấu hình Cloud thành công!');
   };
 
   const handleSyncNow = async () => {
-    if (!supabaseSync.isConnected()) {
-      alert('Vui lòng cấu hình và kết nối Supabase trước khi đồng bộ.');
+    if (!cloudConfig.url || !cloudConfig.anonKey) {
+      alert('Vui lòng nhập Supabase Project URL và Anon Key trước khi đồng bộ.');
       return;
     }
 
     setIsSyncing(true);
     setSyncStatusMsg(null);
     try {
+      // Tự động kích hoạt kết nối nếu chưa bật
+      if (!supabaseSync.isConnected()) {
+        const newCfg = { ...cloudConfig, enabled: true };
+        await supabaseSync.updateConfig(newCfg);
+        setCloudConfig(newCfg);
+      }
       const result = await supabaseSync.syncAll();
       setSyncStatusMsg(`Đồng bộ thành công! (Đã tải lên: ${result.pushed} mốc, Cập nhật về máy: ${result.pulled} mốc)`);
       onLibraryReload();
     } catch (err: any) {
+      console.error('Sync error:', err);
       setSyncStatusMsg(`Lỗi đồng bộ: ${err?.message || 'Không thể đồng bộ'}`);
     } finally {
       setIsSyncing(false);
@@ -217,8 +231,10 @@ create policy "Allow all personal operations" on user_stories for all using (tru
   return (
     <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
       <div className="border-b border-zinc-800 pb-4">
-        <h1 className="text-2xl font-bold text-zinc-100 flex items-center gap-2">
-          <Settings className="w-6 h-6 text-amber-400" />
+        <h1 className="text-2xl font-bold text-zinc-100 flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg overflow-hidden bg-white p-0.5 border border-zinc-700/60 shadow-sm shrink-0 flex items-center justify-center">
+            <img src="/icon-192.png" alt="NKI Chill Reader" className="w-full h-full object-contain" />
+          </div>
           Cài đặt & Đồng bộ cá nhân
         </h1>
         <p className="text-sm text-zinc-400 mt-1">
@@ -236,7 +252,7 @@ create policy "Allow all personal operations" on user_stories for all using (tru
             <div>
               <h3 className="font-semibold text-sm text-zinc-100 flex items-center gap-2">
                 Đồng bộ Online (Supabase Cloud)
-                {supabaseSync.isConnected() ? (
+                {supabaseSync.isConnected() || (cloudConfig.enabled && Boolean(cloudConfig.url && cloudConfig.anonKey)) ? (
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 font-medium">
                     <CheckCircle2 className="w-3 h-3" /> Đã kết nối
                   </span>
@@ -254,8 +270,8 @@ create policy "Allow all personal operations" on user_stories for all using (tru
 
           <button
             onClick={handleSyncNow}
-            disabled={isSyncing || !cloudConfig.enabled}
-            className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-zinc-950 font-semibold text-xs transition-all cursor-pointer shrink-0"
+            disabled={isSyncing}
+            className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-95 disabled:opacity-50 text-zinc-950 font-semibold text-xs transition-all cursor-pointer shrink-0 shadow-md shadow-amber-500/20"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
             {isSyncing ? 'Đang đồng bộ...' : 'Đồng bộ ngay'}
@@ -662,8 +678,17 @@ create policy "Allow all personal operations" on user_stories for all using (tru
       </div>
 
       {/* App Info */}
-      <div className="text-center text-xs text-zinc-500 pt-6 space-y-1">
-        <p className="font-medium text-zinc-400">Chill Reader • Ứng dụng đọc truyện & nghe audio cá nhân</p>
+      <div className="text-center text-xs text-zinc-500 pt-8 pb-4 space-y-2 border-t border-zinc-800/80">
+        <div className="flex items-center justify-center gap-2">
+          <div className="w-6 h-6 rounded-md overflow-hidden bg-white p-0.5 border border-zinc-700/60 shadow-xs">
+            <img src="/icon-192.png" alt="NKI Logo" className="w-full h-full object-contain" />
+          </div>
+          <span className="font-bold text-zinc-300">Chill Reader</span>
+          <span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+            NKI Ecosystem
+          </span>
+        </div>
+        <p className="font-medium text-zinc-400">Ứng dụng đọc truyện chữ & nghe audio cá nhân</p>
         <p>Phiên bản 1.0 • Hoàn toàn riêng tư, không quảng cáo, đồng bộ Supabase Cloud đa nền tảng</p>
       </div>
     </div>
