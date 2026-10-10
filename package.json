@@ -6,10 +6,15 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "cap:build": "npm run build && npx cap sync android",
+    "cap:open": "npx cap open android",
     "lint": "oxlint",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/cli": "^8.5.3",
+    "@capacitor/core": "^8.5.3",
     "@supabase/supabase-js": "^2.117.3",
     "dexie": "^4.4.6",
     "edge-tts-universal": "^1.4.0",
