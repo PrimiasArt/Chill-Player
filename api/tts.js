@@ -79,28 +79,35 @@ export default async function handler(req, res) {
     const pitchStr = pitchHz >= 0 ? `+${pitchHz}Hz` : `${pitchHz}Hz`;
 
     try {
-      const comm = new Communicate(sanitizedText, {
-        voice: cleanVoice,
-        rate: rateStr,
-        pitch: pitchStr
-      });
+      const edgePromise = (async () => {
+        const comm = new Communicate(sanitizedText, {
+          voice: cleanVoice,
+          rate: rateStr,
+          pitch: pitchStr
+        });
 
-      const chunks = [];
-      for await (const chunk of comm.stream()) {
-        if (chunk.type === 'audio' && chunk.data) {
-          chunks.push(chunk.data);
+        const chunks = [];
+        for await (const chunk of comm.stream()) {
+          if (chunk.type === 'audio' && chunk.data) {
+            chunks.push(chunk.data);
+          }
         }
-      }
+        return chunks.length > 0 ? Buffer.concat(chunks) : null;
+      })();
 
-      if (chunks.length > 0) {
-        const audioBuffer = Buffer.concat(chunks);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Edge TTS timed out after 5s')), 5000)
+      );
+
+      const audioBuffer = await Promise.race([edgePromise, timeoutPromise]);
+      if (audioBuffer) {
         res.setHeader('Content-Type', 'audio/mpeg');
         res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=86400');
         res.status(200).send(audioBuffer);
         return;
       }
     } catch (edgeErr) {
-      console.warn('Edge TTS synthesis failed, attempting Google fallback:', edgeErr);
+      console.warn('Edge TTS failed or timed out, attempting Google fallback:', edgeErr.message);
     }
 
     // Fallback to Google Translate TTS
