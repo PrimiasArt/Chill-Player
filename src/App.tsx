@@ -265,7 +265,14 @@ export const App: React.FC = () => {
 
   const handleReloadActiveStoryChapters = async () => {
     if (!activeStory) return;
-    const chs = await db.getStoryChapters(activeStory.id);
+    const [chs, refreshedStory] = await Promise.all([
+      db.getStoryChapters(activeStory.id),
+      db.stories.get(activeStory.id)
+    ]);
+    if (refreshedStory) {
+      setActiveStory(refreshedStory);
+      setStories(prev => prev.map(s => s.id === refreshedStory.id ? refreshedStory : s));
+    }
     setActiveStoryChapters(chs);
     if (chs.length > 0) {
       const targetChapter = chs.find(c => c.chapterNumber === currentChapterNumber) || chs[0];

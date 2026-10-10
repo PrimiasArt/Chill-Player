@@ -17,10 +17,10 @@ import {
   Loader2,
   AlertCircle
 } from 'lucide-react';
-import type { Story, Chapter, ReaderSettings, ReaderTheme, FontFamily } from '../types';
+import type { Story, Chapter, ReaderSettings, ReaderTheme, FontFamily, CrawlSearchResult } from '../types';
 import { ttsEngine, type TTSState } from '../services/tts/ttsEngine';
 import { supabaseSync } from '../services/sync/supabaseSync';
-import { fetchStoryDetail, batchDownloadChapters } from '../services/crawler';
+import { fetchStoryDetail, batchDownloadChapters, searchStories } from '../services/crawler';
 import { db } from '../services/db';
 
 interface ReaderViewProps {
@@ -53,6 +53,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   onReloadChapters
 }) => {
   const currentChapter = chapters.find(c => c.chapterNumber === currentChapterNumber) || chapters[0];
+  const hasContent = Boolean(currentChapter && currentChapter.content && currentChapter.content.trim().length > 0);
   
   // UI states
   const [showControls, setShowControls] = useState(true);
@@ -68,6 +69,32 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   const [downloadStatus, setDownloadStatus] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
+  // Auto source detection states
+  const [detectedSource, setDetectedSource] = useState<CrawlSearchResult | null>(null);
+  const [isSearchingSource, setIsSearchingSource] = useState(false);
+  const [showManualUrlInput, setShowManualUrlInput] = useState(false);
+  const [manualUrlInput, setManualUrlInput] = useState('');
+
+  // Auto search online source if story has no sourceUrl and has no content
+  useEffect(() => {
+    let isMounted = true;
+    if (!hasContent && !story.sourceUrl && story.title) {
+      setIsSearchingSource(true);
+      searchStories(story.title)
+        .then(results => {
+          if (!isMounted) return;
+          if (results && results.length > 0) {
+            setDetectedSource(results[0]);
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (isMounted) setIsSearchingSource(false);
+        });
+    }
+    return () => { isMounted = false; };
+  }, [hasContent, story.sourceUrl, story.title]);
+
   const handlePullFromCloud = async () => {
     setIsDownloadingChapters(true);
     setDownloadStatus('Đang kết nối Supabase Cloud để tải chương...');
@@ -76,14 +103,16 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
       if (!supabaseSync.isConnected()) {
         throw new Error('Chưa kết nối Supabase. Vui lòng vào Cài đặt để thiết lập tài khoản Supabase.');
       }
-      const count = await supabaseSync.pullStoryChapters(story.id);
-      if (count > 0) {
-        setDownloadStatus(`Đã tải thành công ${count} chương từ đám mây!`);
+      const res = await supabaseSync.pullStoryChapters(story.id);
+      if (res.count > 0) {
+        setDownloadStatus(`Đã tải thành công ${res.count} chương từ đám mây!`);
         if (onReloadChapters) {
           await onReloadChapters();
         }
       } else {
-        setDownloadError('Không tìm thấy nội dung chương của truyện này trên Supabase Cloud. (Có thể máy tính chưa tạo bảng user_chapters hoặc chưa đồng bộ lên).');
+        setDownloadError(
+          res.error || 'Không tìm thấy nội dung chương của truyện này trên Supabase Cloud. Bạn hãy bấm nút "Tải từ Web Online" bên dưới để tải trực tiếp các chương về máy.'
+        );
       }
     } catch (err: any) {
       setDownloadError(err?.message || 'Lỗi khi tải chương từ Supabase');
@@ -92,9 +121,10 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
     }
   };
 
-  const handleDownloadFromOnlineSource = async () => {
-    if (!story.sourceUrl) {
-      setDownloadError('Truyện này không có liên kết nguồn web để tải tự động.');
+  const handleDownloadFromOnlineSource = async (customUrl?: string) => {
+    const urlToUse = customUrl || story.sourceUrl || detectedSource?.sourceUrl || manualUrlInput.trim();
+    if (!urlToUse) {
+      setDownloadError('Vui lòng chọn hoặc nhập liên kết nguồn truyện online.');
       return;
     }
 
@@ -103,51 +133,75 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
     setDownloadError(null);
 
     try {
-      const detail = await fetchStoryDetail(story.sourceUrl);
+      const detail = await fetchStoryDetail(urlToUse);
       if (!detail.chapters || detail.chapters.length === 0) {
         throw new Error('Không lấy được danh sách chương từ nguồn web này.');
       }
 
-      const targetCount = Math.min(detail.chapters.length, 50);
-      const chaptersToDownload = detail.chapters.slice(0, targetCount);
+      // Calculate 50-chapter download window starting from the current chapter (e.g. 1364)
+      const targetStartNum = Math.max(1, currentChapterNumber);
+      let startIdx = detail.chapters.findIndex(c => c.number === targetStartNum);
+      if (startIdx === -1) {
+        startIdx = Math.max(0, targetStartNum - 1);
+      }
+      const endIdx = Math.min(detail.chapters.length, startIdx + 50);
+      const chaptersToDownload = detail.chapters.slice(startIdx, endIdx);
 
-      setDownloadStatus(`Đang tải 1-${targetCount} chương từ nguồn online...`);
+      const fromNum = chaptersToDownload[0]?.number || targetStartNum;
+      const toNum = chaptersToDownload[chaptersToDownload.length - 1]?.number || (fromNum + chaptersToDownload.length - 1);
+
+      setDownloadStatus(`Đang tải chương ${fromNum} đến ${toNum} từ nguồn web...`);
 
       const results = await batchDownloadChapters(
-        chaptersToDownload.map((c, i) => ({ title: c.title, url: c.url, number: c.number || (i + 1) })),
+        chaptersToDownload.map((c, i) => ({ 
+          title: c.title, 
+          url: c.url, 
+          number: c.number || (targetStartNum + i) 
+        })),
         (cur, tot, t) => {
           setDownloadStatus(`Đang tải chương ${cur}/${tot}: ${t || ''}`);
         }
       );
 
       const successfulChapters: Chapter[] = [];
-      results.forEach((r, idx) => {
+      results.forEach((r) => {
         if (r.success && r.content) {
+          const chMeta = chaptersToDownload.find(c => c.url === r.url);
+          const chNum = chMeta ? chMeta.number : (targetStartNum + successfulChapters.length);
           successfulChapters.push({
-            id: `${story.id}_ch_${idx + 1}`,
+            id: `${story.id}_ch_${chNum}`,
             storyId: story.id,
-            chapterNumber: idx + 1,
-            title: r.title || `Chương ${idx + 1}`,
+            chapterNumber: chNum,
+            title: r.title || chMeta?.title || `Chương ${chNum}`,
             content: r.content,
-            wordCount: r.wordCount || 0,
+            wordCount: r.wordCount || r.content.split(/\s+/).length,
             sourceUrl: r.url
           });
         }
       });
 
       if (successfulChapters.length === 0) {
-        throw new Error('Không tải được nội dung của chương nào. Vui lòng kiểm tra lại kết nối mạng.');
+        throw new Error('Không tải được nội dung của chương nào từ nguồn web này. Vui lòng kiểm tra lại kết nối mạng.');
       }
 
       await db.chapters.bulkPut(successfulChapters);
+      const updatedTotal = Math.max(story.totalChapters || 0, detail.totalChapters || detail.chapters.length);
       await db.stories.update(story.id, {
-        totalChapters: detail.totalChapters || successfulChapters.length
+        sourceUrl: urlToUse,
+        totalChapters: updatedTotal
       });
 
-      // Also push to Supabase if connected
-      await supabaseSync.pushStoryChapters(story.id, successfulChapters);
+      // Also sync progress & chapters to Supabase in background
+      if (supabaseSync.isConnected()) {
+        await supabaseSync.pushStoryProgress({
+          ...story,
+          sourceUrl: urlToUse,
+          totalChapters: updatedTotal
+        });
+        supabaseSync.pushStoryChapters(story.id, successfulChapters).catch(() => {});
+      }
 
-      setDownloadStatus(`Đã tải xong ${successfulChapters.length} chương!`);
+      setDownloadStatus(`Đã tải xong ${successfulChapters.length} chương (Chương ${fromNum} - ${toNum})!`);
       if (onReloadChapters) {
         await onReloadChapters();
       }
@@ -369,8 +423,8 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
       </div>
 
       {/* Main Reading Text Area or Empty State */}
-      {chapters.length === 0 ? (
-        <main className="flex-1 max-w-xl mx-auto w-full px-5 py-20 flex flex-col items-center justify-center text-center">
+      {!hasContent ? (
+        <main className="flex-1 max-w-xl mx-auto w-full px-5 py-16 flex flex-col items-center justify-center text-center">
           <div className="w-24 h-32 rounded-xl overflow-hidden shadow-2xl border border-zinc-700/60 mb-5 bg-zinc-900 shrink-0">
             {story.coverUrl ? (
               <img src={story.coverUrl} alt={story.title} className="w-full h-full object-cover" />
@@ -387,10 +441,10 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
           <div className="w-full bg-zinc-900/90 border border-zinc-800 rounded-2xl p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-center gap-2 text-amber-400 font-semibold text-sm">
               <AlertCircle className="w-4 h-4" />
-              Chưa có nội dung chữ trên thiết bị này
+              Chương {currentChapterNumber} chưa có nội dung chữ
             </div>
             <p className="text-xs text-zinc-400 leading-relaxed">
-              Truyện đã được đồng bộ danh mục, nhưng nội dung chi tiết của các chương chưa được tải về máy. Bạn có thể tải ngay dưới đây:
+              Truyện đã được đồng bộ danh mục tới <strong>Chương {currentChapterNumber}</strong>, nhưng chữ của chương này chưa được tải về máy. Hãy tải ngay dưới đây:
             </p>
 
             {downloadStatus && (
@@ -401,36 +455,92 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
             )}
 
             {downloadError && (
-              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-xs flex items-center gap-2 text-left">
-                <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
-                <span>{downloadError}</span>
+              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-xs flex items-start gap-2 text-left">
+                <AlertCircle className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
+                <span className="leading-relaxed">{downloadError}</span>
               </div>
             )}
 
-            <div className="pt-2 space-y-2.5">
+            <div className="pt-2 space-y-3">
+              {/* Option A: Online Web Source (Primary & Instant) */}
+              {(story.sourceUrl || detectedSource) ? (
+                <div className="p-3.5 rounded-xl bg-gradient-to-r from-amber-500/15 via-zinc-800 to-zinc-900 border border-amber-500/30 text-left space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold text-amber-300 flex items-center gap-1.5 uppercase tracking-wide">
+                      <Zap className="w-3.5 h-3.5 text-amber-400" />
+                      Nguồn online: {detectedSource?.sourceName || (story.sourceUrl?.includes('wetruyen') ? 'WeTruyen' : 'Web Online')}
+                    </span>
+                    {(detectedSource?.latestChapter || story.totalChapters) && (
+                      <span className="text-[10px] text-zinc-400 font-medium">
+                        {detectedSource?.latestChapter || `${story.totalChapters} chương`}
+                      </span>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={() => handleDownloadFromOnlineSource(story.sourceUrl || detectedSource?.sourceUrl)}
+                    disabled={isDownloadingChapters}
+                    className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-98 disabled:opacity-50 text-zinc-950 font-bold text-xs transition-all shadow-lg shadow-amber-500/20 cursor-pointer"
+                  >
+                    {isDownloadingChapters ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4 text-zinc-950" />}
+                    Tải 50 chương (từ Chương {currentChapterNumber}) từ Web Online
+                  </button>
+                </div>
+              ) : isSearchingSource ? (
+                <div className="p-3.5 rounded-xl bg-zinc-800/80 border border-zinc-700 text-xs text-zinc-300 flex items-center justify-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                  <span>Đang tự động tìm nguồn đọc online cho "{story.title}"...</span>
+                </div>
+              ) : null}
+
+              {/* Manual URL Input Option */}
+              <div className="text-left">
+                {!showManualUrlInput ? (
+                  <button
+                    onClick={() => setShowManualUrlInput(true)}
+                    className="text-[11px] text-amber-400 hover:text-amber-300 underline underline-offset-2 flex items-center gap-1 cursor-pointer mx-auto"
+                  >
+                    <Search className="w-3 h-3" />
+                    Nhập hoặc dán link nguồn truyện online
+                  </button>
+                ) : (
+                  <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 space-y-2">
+                    <label className="text-[11px] text-zinc-400 block font-medium">
+                      Dán link truyện từ WeTruyen hoặc TruyenFull:
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="url"
+                        value={manualUrlInput}
+                        onChange={(e) => setManualUrlInput(e.target.value)}
+                        placeholder="https://wetruyen.com/..."
+                        className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-amber-500"
+                      />
+                      <button
+                        onClick={() => handleDownloadFromOnlineSource(manualUrlInput)}
+                        disabled={isDownloadingChapters || !manualUrlInput.trim()}
+                        className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 font-bold text-xs cursor-pointer"
+                      >
+                        Tải
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Option B: Supabase Cloud (Secondary) */}
               <button
                 onClick={handlePullFromCloud}
                 disabled={isDownloadingChapters}
-                className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-98 disabled:opacity-50 text-zinc-950 font-semibold text-xs transition-all shadow-lg shadow-amber-500/20 cursor-pointer"
+                className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 active:scale-98 disabled:opacity-50 text-zinc-300 border border-zinc-700 font-medium text-xs transition-all cursor-pointer"
               >
-                {isDownloadingChapters ? <Loader2 className="w-4 h-4 animate-spin" /> : <CloudDownload className="w-4 h-4" />}
-                Tải nội dung chương từ Supabase Cloud
+                {isDownloadingChapters ? <Loader2 className="w-4 h-4 animate-spin" /> : <CloudDownload className="w-4 h-4 text-zinc-400" />}
+                Tải từ Supabase Cloud cá nhân
               </button>
-
-              {story.sourceUrl && (
-                <button
-                  onClick={handleDownloadFromOnlineSource}
-                  disabled={isDownloadingChapters}
-                  className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 active:scale-98 disabled:opacity-50 text-zinc-200 border border-zinc-700 font-medium text-xs transition-all cursor-pointer"
-                >
-                  {isDownloadingChapters ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4 text-amber-400" />}
-                  Tải các chương từ nguồn web online
-                </button>
-              )}
 
               <button
                 onClick={onBackToLibrary}
-                className="w-full py-2.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
+                className="w-full py-2 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
               >
                 Quay lại Thư viện
               </button>

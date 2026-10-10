@@ -175,19 +175,28 @@ class SupabaseSyncService {
   public async testConnection(url: string, anonKey: string): Promise<{ success: boolean; message: string }> {
     try {
       const testClient = createClient(url, anonKey);
-      // Query user_stories table
-      const { error } = await testClient.from('user_stories').select('id').limit(1);
-      if (error) {
-        // If table does not exist, give helpful SQL schema hint
-        if (error.code === '42P01') {
+      // 1. Query user_stories table
+      const { error: storyError } = await testClient.from('user_stories').select('id').limit(1);
+      if (storyError) {
+        if (storyError.code === '42P01') {
           return {
             success: false,
-            message: 'Kết nối thành công nhưng chưa tạo bảng "user_stories". Hãy chạy đoạn mã SQL trong phần hướng dẫn.'
+            message: 'Kết nối thành công nhưng chưa tạo bảng "user_stories". Hãy chạy mã SQL trong phần Hướng dẫn.'
           };
         }
-        return { success: false, message: `Lỗi Supabase: ${error.message}` };
+        return { success: false, message: `Lỗi Supabase: ${storyError.message}` };
       }
-      return { success: true, message: 'Kết nối Supabase thành công!' };
+
+      // 2. Query user_chapters table
+      const { error: chError } = await testClient.from('user_chapters').select('id').limit(1);
+      if (chError && chError.code === '42P01') {
+        return {
+          success: true,
+          message: 'Kết nối tốt! Lưu ý: Bảng "user_chapters" chưa được tạo trên Supabase (hãy chạy thêm mã SQL trong hướng dẫn để lưu được nội dung chữ).'
+        };
+      }
+
+      return { success: true, message: 'Kết nối Supabase hoàn hảo! Đã sẵn sàng đồng bộ cả tủ sách và nội dung chữ.' };
     } catch (err: any) {
       return { success: false, message: err?.message || 'Không thể kết nối đến Supabase.' };
     }
@@ -271,8 +280,10 @@ class SupabaseSyncService {
   /**
    * Pull chapters of a story from Supabase user_chapters table
    */
-  public async pullStoryChapters(storyId: string): Promise<number> {
-    if (!this.isConnected() || !this.client) return 0;
+  public async pullStoryChapters(storyId: string): Promise<{ count: number; error?: string }> {
+    if (!this.isConnected() || !this.client) {
+      return { count: 0, error: 'Chưa kết nối Supabase Cloud.' };
+    }
     try {
       let allChapters: any[] = [];
       let from = 0;
@@ -287,7 +298,12 @@ class SupabaseSyncService {
           .range(from, from + batchSize - 1);
 
         if (error) {
-          if (error.code === '42P01') return 0;
+          if (error.code === '42P01') {
+            return { 
+              count: 0, 
+              error: 'Bảng "user_chapters" chưa được tạo trên Supabase Cloud. Hãy chạy mã SQL trong phần Cài đặt.' 
+            };
+          }
           throw error;
         }
 
@@ -308,14 +324,12 @@ class SupabaseSyncService {
           sourceUrl: c.source_url
         }));
         await db.chapters.bulkPut(chaptersToInsert);
-        return chaptersToInsert.length;
+        return { count: chaptersToInsert.length };
       }
+      return { count: 0, error: 'Không tìm thấy chương nào của truyện này trên Supabase Cloud.' };
     } catch (err: any) {
-      if (err?.code !== '42P01') {
-        console.warn('Failed to pull chapters from Supabase:', err);
-      }
+      return { count: 0, error: err?.message || 'Lỗi khi tải từ Supabase' };
     }
-    return 0;
   }
 
   /**
