@@ -1,5 +1,16 @@
-// Vercel Serverless Function: /api/crawler
-const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+const BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+  'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+  'Sec-Ch-Ua': '"Chromium";v="124", "Google Chrome";v="124"',
+  'Sec-Ch-Ua-Mobile': '?0',
+  'Sec-Ch-Ua-Platform': '"Windows"',
+  'Sec-Fetch-Dest': 'document',
+  'Sec-Fetch-Mode': 'navigate',
+  'Sec-Fetch-Site': 'none',
+  'Sec-Fetch-User': '?1',
+  'Upgrade-Insecure-Requests': '1'
+};
 
 function decodeHtmlEntities(str) {
   if (!str) return '';
@@ -45,7 +56,7 @@ function cleanChapterContent(html) {
 
 async function handleSearch(keyword) {
   const url = `https://truyenhh3d.com/tim-kiem?q=${encodeURIComponent(keyword)}`;
-  const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
+  const res = await fetch(url, { headers: BROWSER_HEADERS });
   if (!res.ok) throw new Error(`Lỗi tìm kiếm: HTTP ${res.status}`);
   const html = await res.text();
 
@@ -88,7 +99,7 @@ async function handleSearch(keyword) {
 }
 
 async function handleStoryDetail(storyUrl) {
-  const res = await fetch(storyUrl, { headers: { 'User-Agent': USER_AGENT } });
+  const res = await fetch(storyUrl, { headers: BROWSER_HEADERS });
   if (!res.ok) throw new Error(`Lỗi tải thông tin truyện: HTTP ${res.status}`);
   const html = await res.text();
 
@@ -171,7 +182,7 @@ async function handleChapter(chapterUrl, retries = 2) {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const res = await fetch(chapterUrl, { 
-        headers: { 'User-Agent': USER_AGENT },
+        headers: BROWSER_HEADERS,
         signal: AbortSignal.timeout(10000)
       });
       if (!res.ok) throw new Error(`Lỗi tải chương: HTTP ${res.status}`);
