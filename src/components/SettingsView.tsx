@@ -4,19 +4,22 @@ import {
   Upload, 
   Trash2, 
   Volume2, 
-  Sparkles,
-  Type,
-  Cloud,
-  RefreshCw,
-  CheckCircle2,
-  AlertCircle,
-  Copy,
-  Check,
-  ChevronDown,
-  ChevronUp,
-  Play,
-  Loader2,
-  User
+  Sparkles, 
+  Type, 
+  Cloud, 
+  RefreshCw, 
+  CheckCircle2, 
+  AlertCircle, 
+  Copy, 
+  Check, 
+  ChevronDown, 
+  ChevronUp, 
+  Play, 
+  Loader2, 
+  User,
+  Zap,
+  QrCode,
+  Share2
 } from 'lucide-react';
 import { db } from '../services/db';
 import { supabaseSync, type SupabaseConfig } from '../services/sync/supabaseSync';
@@ -49,6 +52,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [showSqlGuide, setShowSqlGuide] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
 
+  // 1-Click Quick Pairing state
+  const [pairingInputCode, setPairingInputCode] = useState('');
+  const [isApplyingPairing, setIsApplyingPairing] = useState(false);
+  const [showPairingModal, setShowPairingModal] = useState(false);
+  const [copiedPairingCode, setCopiedPairingCode] = useState(false);
+  const [pairingMessage, setPairingMessage] = useState<{ success: boolean; message: string } | null>(null);
+  const [showManualCloudConfig, setShowManualCloudConfig] = useState(false);
+
   // TTS Voice state
   const [testingVoiceId, setTestingVoiceId] = useState<string | null>(null);
   const [voices, setVoices] = useState<VoiceOption[]>([]);
@@ -76,6 +87,31 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     } finally {
       setTestingVoiceId(null);
     }
+  };
+
+  const handleApplyPairing = async () => {
+    if (!pairingInputCode.trim()) return;
+    setIsApplyingPairing(true);
+    setPairingMessage(null);
+    try {
+      const res = await supabaseSync.applyPairingCode(pairingInputCode.trim());
+      setPairingMessage(res);
+      if (res.success) {
+        setCloudConfig(supabaseSync.getConfig());
+        onLibraryReload();
+      }
+    } finally {
+      setIsApplyingPairing(false);
+    }
+  };
+
+  const currentPairingCode = supabaseSync.generatePairingCode();
+
+  const handleCopyPairingCode = () => {
+    if (!currentPairingCode) return;
+    navigator.clipboard.writeText(currentPairingCode);
+    setCopiedPairingCode(true);
+    setTimeout(() => setCopiedPairingCode(false), 2500);
   };
 
   const handleTestConnection = async () => {
@@ -118,14 +154,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setIsSyncing(true);
     setSyncStatusMsg(null);
     try {
-      // Tự động kích hoạt kết nối nếu chưa bật
       if (!supabaseSync.isConnected()) {
         const newCfg = { ...cloudConfig, enabled: true };
         await supabaseSync.updateConfig(newCfg);
         setCloudConfig(newCfg);
       }
       const result = await supabaseSync.syncAll();
-      setSyncStatusMsg(`Đồng bộ thành công! (Đã tải lên: ${result.pushed} mốc, Cập nhật về máy: ${result.pulled} mốc)`);
+      setSyncStatusMsg(`Đồng bộ thành công! (Tải lên: ${result.pushed} mục, Kéo về: ${result.pulled} mục)`);
       onLibraryReload();
     } catch (err: any) {
       console.error('Sync error:', err);
@@ -306,76 +341,192 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
           </div>
         )}
 
-        {/* Input Fields */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="text-xs text-zinc-400 block mb-1">
-              Supabase Project URL
-            </label>
-            <input
-              type="text"
-              value={cloudConfig.url}
-              onChange={(e) => setCloudConfig(prev => ({ ...prev, url: e.target.value.trim() }))}
-              placeholder="https://xxxxxxxx.supabase.co"
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-amber-500 font-mono"
-            />
-          </div>
+        {/* 1-Click Quick Pairing Section */}
+        {supabaseSync.isConnected() ? (
+          <div className="bg-gradient-to-r from-amber-500/10 via-zinc-800/80 to-zinc-900 border border-amber-500/25 rounded-xl p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h4 className="text-xs font-bold text-amber-300 flex items-center gap-1.5 uppercase tracking-wide">
+                  <Share2 className="w-4 h-4 text-amber-400" />
+                  Ghép nối với điện thoại / máy khác (1-chạm)
+                </h4>
+                <p className="text-xs text-zinc-300 mt-1">
+                  Không cần nhập URL hay Key rườm rà. Lấy mã hoặc quét QR để app trên điện thoại tự đồng bộ tức thì.
+                </p>
+              </div>
 
-          <div>
-            <label className="text-xs text-zinc-400 block mb-1">
-              Supabase Anon Key (Public Key)
-            </label>
-            <input
-              type="password"
-              value={cloudConfig.anonKey}
-              onChange={(e) => setCloudConfig(prev => ({ ...prev, anonKey: e.target.value.trim() }))}
-              placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..."
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-amber-500 font-mono"
-            />
-          </div>
-        </div>
+              <button
+                onClick={() => setShowPairingModal(!showPairingModal)}
+                className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-95 text-zinc-950 font-bold text-xs transition-all shrink-0 cursor-pointer shadow-md shadow-amber-500/20"
+              >
+                <QrCode className="w-4 h-4" />
+                {showPairingModal ? 'Đóng mã ghép nối' : 'Lấy mã ghép nối'}
+              </button>
+            </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-1">
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="autoSyncToggle"
-              checked={cloudConfig.autoSync}
-              onChange={(e) => setCloudConfig(prev => ({ ...prev, autoSync: e.target.checked }))}
-              className="w-4 h-4 accent-amber-500 rounded"
-            />
-            <label htmlFor="autoSyncToggle" className="text-xs text-zinc-300 cursor-pointer">
-              Tự động lưu mốc đọc lên Cloud mỗi khi chuyển chương
-            </label>
-          </div>
+            {showPairingModal && currentPairingCode && (
+              <div className="mt-3 pt-3 border-t border-zinc-700/60 flex flex-col md:flex-row items-center gap-5 p-2 bg-zinc-950/60 rounded-xl">
+                {/* QR Code image */}
+                <div className="w-36 h-36 bg-white p-2 rounded-xl shrink-0 shadow-lg flex items-center justify-center">
+                  <img
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(currentPairingCode)}`}
+                    alt="Mã QR Ghép nối Chill Reader"
+                    className="w-full h-full object-contain"
+                  />
+                </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleTestConnection}
-              disabled={isTesting}
-              className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 text-xs font-medium transition-colors cursor-pointer"
-            >
-              {isTesting ? 'Đang thử...' : 'Kiểm tra kết nối'}
-            </button>
-            <button
-              onClick={handleSaveCloudConfig}
-              className="px-4 py-1.5 rounded-lg bg-zinc-700 hover:bg-amber-500 hover:text-zinc-950 text-zinc-200 text-xs font-medium transition-colors cursor-pointer"
-            >
-              Lưu cấu hình
-            </button>
+                <div className="space-y-2 flex-1 min-w-0 w-full">
+                  <label className="text-xs text-zinc-400 block font-medium">
+                    Mã ghép nối 1-chạm (Copy gửi qua Zalo / Note vào điện thoại):
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={currentPairingCode}
+                      className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-[11px] text-zinc-300 font-mono select-all truncate"
+                    />
+                    <button
+                      onClick={handleCopyPairingCode}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs transition-all shrink-0 cursor-pointer shadow-sm"
+                    >
+                      {copiedPairingCode ? <Check className="w-4 h-4 text-emerald-950" /> : <Copy className="w-4 h-4" />}
+                      {copiedPairingCode ? 'Đã chép!' : 'Sao chép'}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    👉 Trên điện thoại, bạn chỉ cần mở <strong>Cài đặt</strong> và dán mã này vào là app tự kết nối và đồng bộ toàn bộ tủ truyện ngay!
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-
-        {testResult && (
-          <div className={`p-3 rounded-xl border text-xs flex items-center gap-2 ${
-            testResult.success 
-              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' 
-              : 'bg-red-500/10 border-red-500/30 text-red-300'
-          }`}>
-            {testResult.success ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
-            <span>{testResult.message}</span>
+        ) : (
+          <div className="bg-gradient-to-r from-amber-500/15 via-zinc-800 to-zinc-900 border border-amber-500/30 rounded-xl p-4 space-y-3">
+            <div className="flex items-center gap-2 text-xs font-bold text-amber-300 uppercase tracking-wide">
+              <Zap className="w-4 h-4 text-amber-400" />
+              Ghép nối nhanh 1-chạm từ máy tính (Khuyên dùng)
+            </div>
+            <p className="text-xs text-zinc-300 leading-relaxed">
+              Nếu bạn đã có cấu hình trên máy tính, chỉ cần dán mã ghép nối vào đây để app tự động kết nối và tải toàn bộ sách về:
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="text"
+                value={pairingInputCode}
+                onChange={(e) => setPairingInputCode(e.target.value)}
+                placeholder="Dán mã CRSYNC:... vào đây"
+                className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-amber-500 font-mono"
+              />
+              <button
+                onClick={handleApplyPairing}
+                disabled={isApplyingPairing || !pairingInputCode.trim()}
+                className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-95 disabled:opacity-50 text-zinc-950 font-bold text-xs transition-all cursor-pointer shrink-0 shadow-md shadow-amber-500/20"
+              >
+                {isApplyingPairing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+                {isApplyingPairing ? 'Đang ghép...' : 'Ghép nối ngay'}
+              </button>
+            </div>
+            {pairingMessage && (
+              <div className={`p-2.5 rounded-lg text-xs flex items-center gap-2 ${
+                pairingMessage.success ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30' : 'bg-red-500/10 text-red-300 border border-red-500/30'
+              }`}>
+                {pairingMessage.success ? <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" /> : <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />}
+                <span>{pairingMessage.message}</span>
+              </div>
+            )}
           </div>
         )}
+
+        {/* Auto Sync Toggle */}
+        <div className="flex items-center gap-2 pt-1 border-t border-zinc-800/80">
+          <input
+            type="checkbox"
+            id="autoSyncToggle"
+            checked={cloudConfig.autoSync}
+            onChange={(e) => {
+              const val = e.target.checked;
+              setCloudConfig(prev => ({ ...prev, autoSync: val }));
+              supabaseSync.updateConfig({ autoSync: val });
+            }}
+            className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+          />
+          <label htmlFor="autoSyncToggle" className="text-xs text-zinc-300 cursor-pointer">
+            <strong>Tự động đồng bộ ngầm:</strong> Tự đồng bộ tủ sách khi mở app, chuyển chương hoặc đổi thiết bị (không cần bấm nút thủ công)
+          </label>
+        </div>
+
+        {/* Manual Advanced Configuration (Collapsible) */}
+        <div className="border border-zinc-800 rounded-xl overflow-hidden bg-zinc-950/40">
+          <button
+            onClick={() => setShowManualCloudConfig(!showManualCloudConfig)}
+            className="w-full flex items-center justify-between p-3 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
+          >
+            <span className="flex items-center gap-1.5 font-medium">
+              ⚙️ Cấu hình Supabase thủ công (Dành cho nhà phát triển)
+            </span>
+            {showManualCloudConfig ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+
+          {showManualCloudConfig && (
+            <div className="p-4 border-t border-zinc-800 space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs text-zinc-400 block mb-1">
+                    Supabase Project URL
+                  </label>
+                  <input
+                    type="text"
+                    value={cloudConfig.url}
+                    onChange={(e) => setCloudConfig(prev => ({ ...prev, url: e.target.value.trim() }))}
+                    placeholder="https://xxxxxxxx.supabase.co"
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-amber-500 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs text-zinc-400 block mb-1">
+                    Supabase Anon Key (Public Key)
+                  </label>
+                  <input
+                    type="password"
+                    value={cloudConfig.anonKey}
+                    onChange={(e) => setCloudConfig(prev => ({ ...prev, anonKey: e.target.value.trim() }))}
+                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..."
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-amber-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  onClick={handleTestConnection}
+                  disabled={isTesting}
+                  className="px-3.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 text-xs font-medium transition-colors cursor-pointer"
+                >
+                  {isTesting ? 'Đang thử...' : 'Kiểm tra kết nối'}
+                </button>
+                <button
+                  onClick={handleSaveCloudConfig}
+                  className="px-4 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Lưu cấu hình
+                </button>
+              </div>
+
+              {testResult && (
+                <div className={`p-3 rounded-xl border text-xs flex items-center gap-2 ${
+                  testResult.success 
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' 
+                    : 'bg-red-500/10 border-red-500/30 text-red-300'
+                }`}>
+                  {testResult.success ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
+                  <span>{testResult.message}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Collapsible SQL Schema Guide */}
         <div className="border border-zinc-800 rounded-xl overflow-hidden bg-zinc-950/40">

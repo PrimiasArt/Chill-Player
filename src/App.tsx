@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Header } from './components/Header';
+import { BottomNav } from './components/BottomNav';
 import { LibraryView } from './components/LibraryView';
 import { ImportModal } from './components/ImportModal';
 import { CrawlView } from './components/CrawlView';
@@ -60,6 +61,21 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     loadLibrary();
+
+    // Listen to background sync events to silently update UI
+    const unsubSync = supabaseSync.addListener((isSyncing, lastSyncTime) => {
+      if (!isSyncing && lastSyncTime) {
+        db.stories.orderBy('lastReadAt').reverse().toArray().then(items => {
+          if (items && items.length > 0) {
+            setStories(items);
+          }
+        });
+      }
+    });
+
+    return () => {
+      unsubSync();
+    };
   }, [loadLibrary]);
 
   // Hook up TTS Engine Listeners
@@ -304,7 +320,7 @@ export const App: React.FC = () => {
             activeStoryTitle={playingStory?.title}
           />
 
-          <main className="flex-1 pb-24">
+          <main className="flex-1 pb-32 md:pb-24">
             {currentTab === 'library' && (
               <LibraryView
                 stories={stories}
@@ -313,6 +329,7 @@ export const App: React.FC = () => {
                 onDeleteStory={handleDeleteStory}
                 onOpenImport={() => setIsImportModalOpen(true)}
                 onOpenCrawler={() => setCurrentTab('crawler')}
+                onOpenSettings={() => setCurrentTab('settings')}
               />
             )}
 
@@ -332,6 +349,13 @@ export const App: React.FC = () => {
               />
             )}
           </main>
+
+          {/* Mobile Bottom Navigation Bar (Guarantees Settings is always 1 tap away) */}
+          <BottomNav
+            currentTab={currentTab}
+            onSelectTab={setCurrentTab}
+            onOpenImport={() => setIsImportModalOpen(true)}
+          />
         </>
       )}
 

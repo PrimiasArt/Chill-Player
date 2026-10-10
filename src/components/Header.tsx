@@ -47,8 +47,8 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Navigation Tabs */}
-        <nav className="flex items-center gap-1 sm:gap-2">
+        {/* Navigation Tabs (Desktop only - Mobile uses BottomNav) */}
+        <nav className="hidden md:flex items-center gap-1 sm:gap-2">
           <button
             onClick={() => onSelectTab('library')}
             className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
@@ -58,7 +58,7 @@ export const Header: React.FC<HeaderProps> = ({
             }`}
           >
             <BookOpen className="w-4 h-4" />
-            <span className="hidden sm:inline">Tủ sách</span>
+            <span>Tủ sách</span>
           </button>
 
           <button
@@ -70,31 +70,31 @@ export const Header: React.FC<HeaderProps> = ({
             }`}
           >
             <Compass className="w-4 h-4" />
-            <span className="hidden sm:inline">Khám phá</span>
+            <span>Khám phá</span>
           </button>
 
           <button
             onClick={onOpenImport}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 transition-all"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 transition-all cursor-pointer"
           >
             <PlusCircle className="w-4 h-4 text-amber-400" />
-            <span className="hidden sm:inline">Nạp file</span>
+            <span>Nạp file</span>
           </button>
         </nav>
 
-        {/* Right Action Controls: TTS Status & Settings */}
-        <div className="flex items-center gap-2">
+        {/* Right Action Controls: TTS Status & Settings (Always visible on mobile & desktop) */}
+        <div className="flex items-center gap-2 shrink-0">
           {ttsState !== 'idle' && (
             <button
               onClick={onOpenTTSPlayer}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium border transition-all cursor-pointer ${
                 ttsState === 'playing'
                   ? 'bg-amber-500/20 border-amber-500/50 text-amber-300 animate-pulse'
                   : 'bg-zinc-800 border-zinc-700 text-zinc-300'
               }`}
             >
               <Headphones className="w-3.5 h-3.5 text-amber-400" />
-              <span className="max-w-[100px] truncate hidden md:inline">
+              <span className="max-w-[90px] truncate hidden sm:inline">
                 {activeStoryTitle || 'Audio'}
               </span>
               <Volume2 className="w-3.5 h-3.5" />
@@ -103,12 +103,16 @@ export const Header: React.FC<HeaderProps> = ({
 
           <button
             onClick={() => onSelectTab('settings')}
-            className={`p-2 rounded-lg transition-colors ${
-              currentTab === 'settings' ? 'bg-zinc-800 text-amber-400' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
+            className={`p-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+              currentTab === 'settings' 
+                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow-sm' 
+                : 'text-zinc-300 hover:text-amber-400 bg-zinc-800/80 hover:bg-zinc-800 border border-zinc-700/60'
             }`}
-            title="Cài đặt"
+            title="Cài đặt & Đồng bộ"
+            aria-label="Cài đặt"
           >
-            <Settings className="w-5 h-5" />
+            <Settings className="w-5 h-5 text-amber-400" />
+            <span className="text-xs font-semibold hidden sm:inline">Cài đặt</span>
           </button>
         </div>
       </div>

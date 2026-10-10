@@ -9,8 +9,10 @@ import {
   Compass, 
   Clock, 
   Layers,
-  Sparkles
+  Sparkles,
+  Cloud
 } from 'lucide-react';
+import { supabaseSync } from '../services/sync/supabaseSync';
 import type { Story } from '../types';
 
 interface LibraryViewProps {
@@ -20,6 +22,7 @@ interface LibraryViewProps {
   onDeleteStory: (storyId: string) => void;
   onOpenImport: () => void;
   onOpenCrawler: () => void;
+  onOpenSettings?: () => void;
 }
 
 export const LibraryView: React.FC<LibraryViewProps> = ({
@@ -28,7 +31,8 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   onToggleFavorite,
   onDeleteStory,
   onOpenImport,
-  onOpenCrawler
+  onOpenCrawler,
+  onOpenSettings
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterTab, setFilterTab] = useState<'all' | 'reading' | 'favorites'>('all');
@@ -50,11 +54,21 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       {/* Top Banner & Stats */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-zinc-100 flex items-center gap-2">
+          <h1 className="text-2xl font-bold text-zinc-100 flex flex-wrap items-center gap-2">
             Tủ sách của bạn
-            <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 font-normal">
+            <span className="text-xs px-2.5 py-0.5 rounded-full bg-zinc-800 text-zinc-400 font-normal">
               {stories.length} cuốn
             </span>
+            {onOpenSettings && (
+              <button
+                onClick={onOpenSettings}
+                className="text-[11px] px-2.5 py-0.5 rounded-full bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-1.5 transition-all cursor-pointer font-medium"
+                title="Cài đặt & Đồng bộ Cloud"
+              >
+                <Cloud className="w-3.5 h-3.5" />
+                <span>{supabaseSync.isConnected() ? 'Đã bật Cloud' : 'Ghép nối Cloud'}</span>
+              </button>
+            )}
           </h1>
           <p className="text-sm text-zinc-400 mt-1">
             Không gian đọc & nghe truyện riêng tư, mượt mà và không quảng cáo

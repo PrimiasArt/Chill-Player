@@ -25,11 +25,26 @@ class SupabaseSyncService {
   private syncListeners: Set<(isSyncing: boolean, lastSyncTime?: number) => void> = new Set();
   private lastSyncTime: number | null = null;
 
+  private autoSyncTimer: any = null;
+  private hasInitializedAutoSync = false;
+
   public async init() {
     const savedConfig = await db.getSetting<SupabaseConfig>('supabaseConfig', DEFAULT_SUPABASE_CONFIG);
     this.config = savedConfig;
     if (savedConfig.enabled && savedConfig.url && savedConfig.anonKey) {
       this.setupClient(savedConfig.url, savedConfig.anonKey);
+      
+      // Auto-sync in background on startup if enabled
+      if (savedConfig.autoSync) {
+        setTimeout(() => {
+          this.syncAll().catch(e => console.warn('Background initial sync error:', e));
+        }, 1500);
+      }
+    }
+
+    if (!this.hasInitializedAutoSync) {
+      this.hasInitializedAutoSync = true;
+      this.startAutoSyncInterval();
     }
   }
 
@@ -74,6 +89,84 @@ class SupabaseSyncService {
 
   private notify() {
     this.syncListeners.forEach(l => l(this.isSyncing, this.lastSyncTime || undefined));
+  }
+
+  /**
+   * Start periodic auto-sync and focus listener
+   */
+  public startAutoSyncInterval() {
+    if (this.autoSyncTimer) clearInterval(this.autoSyncTimer);
+    if (typeof window === 'undefined') return;
+
+    // Periodic silent sync every 3 minutes
+    this.autoSyncTimer = setInterval(() => {
+      if (this.isConnected() && this.config.autoSync && !this.isSyncing) {
+        this.syncAll().catch(err => console.warn('Periodic auto-sync error:', err));
+      }
+    }, 3 * 60 * 1000);
+
+    // Auto-sync when user returns to app/tab
+    window.addEventListener('focus', () => {
+      if (this.isConnected() && this.config.autoSync && !this.isSyncing) {
+        this.syncAll().catch(err => console.warn('Focus auto-sync error:', err));
+      }
+    });
+  }
+
+  /**
+   * Generate 1-click pairing token (CRSYNC:...)
+   */
+  public generatePairingCode(): string {
+    if (!this.config.url || !this.config.anonKey) return '';
+    try {
+      const payload = {
+        u: this.config.url.trim(),
+        k: this.config.anonKey.trim(),
+        i: this.config.userId || 'default_user'
+      };
+      const jsonStr = JSON.stringify(payload);
+      return 'CRSYNC:' + btoa(unescape(encodeURIComponent(jsonStr)));
+    } catch (err) {
+      console.warn('Failed to generate pairing code:', err);
+      return '';
+    }
+  }
+
+  /**
+   * Apply a 1-click pairing code and verify
+   */
+  public async applyPairingCode(code: string): Promise<{ success: boolean; message: string }> {
+    try {
+      const clean = code.trim().replace(/^CRSYNC:/i, '').trim();
+      const decoded = decodeURIComponent(escape(atob(clean)));
+      const parsed = JSON.parse(decoded);
+      if (!parsed.u || !parsed.k) {
+        return { success: false, message: 'Mã ghép nối thiếu thông tin URL hoặc Key.' };
+      }
+
+      const testRes = await this.testConnection(parsed.u, parsed.k);
+      if (!testRes.success) {
+        return testRes;
+      }
+
+      const newCfg: SupabaseConfig = {
+        url: parsed.u,
+        anonKey: parsed.k,
+        userId: parsed.i || 'default_user',
+        enabled: true,
+        autoSync: true
+      };
+      await this.updateConfig(newCfg);
+
+      // Trigger immediate background sync
+      setTimeout(() => {
+        this.syncAll().catch(e => console.warn('Sync after pairing error:', e));
+      }, 500);
+
+      return { success: true, message: 'Ghép nối thành công! Tủ sách đang được tự động đồng bộ.' };
+    } catch (err: any) {
+      return { success: false, message: 'Mã ghép nối không hợp lệ hoặc bị lỗi ký tự.' };
+    }
   }
 
   /**

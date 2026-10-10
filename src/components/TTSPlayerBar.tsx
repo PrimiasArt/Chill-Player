@@ -63,8 +63,8 @@ export const TTSPlayerBar: React.FC<TTSPlayerBarProps> = ({
 
   return (
     <>
-      {/* 1. Floating Mini Player Bar at Bottom */}
-      <div className="fixed bottom-0 left-0 right-0 z-40 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800 text-zinc-100 shadow-2xl px-4 py-2.5">
+      {/* 1. Floating Mini Player Bar at Bottom (stacked above BottomNav on mobile) */}
+      <div className="fixed bottom-14 md:bottom-0 left-0 right-0 z-40 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800 text-zinc-100 shadow-2xl px-4 py-2.5">
         <div className="max-w-4xl mx-auto flex items-center justify-between gap-3">
           {/* Story & Chapter Info */}
           <div 
