@@ -246,6 +246,31 @@ export default async function handler(req, res) {
     const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     const action = urlObj.searchParams.get('action') || (req.body && req.body.action);
 
+    if (action === 'probe') {
+      const sites = [
+        'https://truyenhh3d.com/',
+        'https://truyenchu.net/',
+        'https://sangtacviet.vip/',
+        'https://metruyencv.com/',
+        'https://bachngocsach.com.vn/',
+        'https://api.allorigins.win/raw?url=https%3A%2F%2Ftruyenhh3d.com%2F'
+      ];
+      const results = {};
+      for (const s of sites) {
+        try {
+          const resp = await fetch(s, {
+            headers: BROWSER_HEADERS,
+            signal: AbortSignal.timeout(4000)
+          });
+          results[s] = { status: resp.status, ok: resp.ok };
+        } catch(e) {
+          results[s] = { error: e.message };
+        }
+      }
+      res.status(200).json({ success: true, results });
+      return;
+    }
+
     if (action === 'search') {
       const q = urlObj.searchParams.get('q') || '';
       const results = await handleSearch(q);
