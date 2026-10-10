@@ -227,61 +227,71 @@ export const CrawlView: React.FC<CrawlViewProps> = ({
           <span className="text-xs text-zinc-400">{searchResults.length} tác phẩm</span>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {searchResults.map((item) => (
-            <div
-              key={item.id}
-              className="bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700/50 hover:border-amber-500/40 rounded-2xl p-3.5 flex flex-col justify-between transition-all duration-200 group"
-            >
-              <div>
-                <div className="flex gap-3 mb-3">
-                  <div className="w-20 h-28 rounded-xl overflow-hidden bg-zinc-900 border border-zinc-700/80 shrink-0">
-                    {item.coverUrl ? (
-                      <img
-                        src={item.coverUrl}
-                        alt={item.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center p-2 text-center text-[10px] text-zinc-400">
+        {searchResults.length === 0 ? (
+          <div className="bg-zinc-800/40 border border-zinc-700/60 rounded-2xl p-8 text-center max-w-md mx-auto my-8">
+            <BookOpen className="w-10 h-10 text-zinc-500 mx-auto mb-3" />
+            <p className="text-zinc-300 font-semibold text-sm">Không tìm thấy truyện phù hợp</p>
+            <p className="text-xs text-zinc-500 mt-1">
+              Hãy thử tìm kiếm với từ khóa khác hoặc ngắn gọn hơn (ví dụ: <span className="text-amber-400">Đấu Phá</span>, <span className="text-amber-400">Kiếm Lai</span>, <span className="text-amber-400">Phàm Nhân</span>).
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {searchResults.map((item) => (
+              <div
+                key={item.id}
+                className="bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700/50 hover:border-amber-500/40 rounded-2xl p-3.5 flex flex-col justify-between transition-all duration-200 group"
+              >
+                <div>
+                  <div className="flex gap-3 mb-3">
+                    <div className="w-20 h-28 rounded-xl overflow-hidden bg-zinc-900 border border-zinc-700/80 shrink-0">
+                      {item.coverUrl ? (
+                        <img
+                          src={item.coverUrl}
+                          alt={item.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center p-2 text-center text-[10px] text-zinc-400">
+                          {item.title}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-sm text-zinc-100 line-clamp-2 group-hover:text-amber-300 transition-colors">
                         {item.title}
-                      </div>
-                    )}
+                      </h3>
+                      <p className="text-xs text-zinc-400 mt-1 truncate">
+                        {item.author}
+                      </p>
+                      {item.latestChapter && (
+                        <p className="text-[11px] text-amber-400/90 mt-2 line-clamp-2 font-medium">
+                          {item.latestChapter}
+                        </p>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold text-sm text-zinc-100 line-clamp-2 group-hover:text-amber-300 transition-colors">
-                      {item.title}
-                    </h3>
-                    <p className="text-xs text-zinc-400 mt-1 truncate">
-                      {item.author}
+                  {item.description && (
+                    <p className="text-xs text-zinc-400 line-clamp-2 mb-3">
+                      {item.description}
                     </p>
-                    {item.latestChapter && (
-                      <p className="text-[11px] text-amber-400/90 mt-2 line-clamp-2 font-medium">
-                        {item.latestChapter}
-                      </p>
-                    )}
-                  </div>
+                  )}
                 </div>
 
-                {item.description && (
-                  <p className="text-xs text-zinc-400 line-clamp-2 mb-3">
-                    {item.description}
-                  </p>
-                )}
+                <button
+                  onClick={() => handleSelectStory(item)}
+                  className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-zinc-700/80 hover:bg-amber-500 hover:text-zinc-950 text-zinc-200 text-xs font-semibold transition-all cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Cào về tủ sách
+                </button>
               </div>
-
-              <button
-                onClick={() => handleSelectStory(item)}
-                className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-zinc-700/80 hover:bg-amber-500 hover:text-zinc-950 text-zinc-200 text-xs font-semibold transition-all cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" />
-                Cào về tủ sách
-              </button>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Story Detail & Download Modal */}

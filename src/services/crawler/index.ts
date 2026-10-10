@@ -84,7 +84,7 @@ export async function searchStories(keyword: string): Promise<CrawlSearchResult[
 
     if (res.ok) {
       const data = await res.json();
-      if (data.success && Array.isArray(data.results) && data.results.length > 0) {
+      if (data.success && Array.isArray(data.results)) {
         return data.results;
       }
     }
