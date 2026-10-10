@@ -48,7 +48,7 @@ export type TTSEngineType = 'ai' | 'google' | 'browser';
 export interface TTSSettings {
   voiceURI: string;
   engine?: TTSEngineType;
-  rate: number; // 0.5 - 2.5
+  rate: number; // 0.5 - 4.0
   pitch: number; // 0.8 - 1.2
   sleepTimerMinutes: number | null; // e.g. 15, 30, 45, or null
   highlightSentence: boolean;

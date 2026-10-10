@@ -72,7 +72,10 @@ export default async function handler(req, res) {
     // 2. Microsoft Edge Neural Provider (Nam Minh, Hoài My...)
     const cleanVoice = voice.replace(/^edge:/, '');
 
-    const ratePercent = Math.round((parseFloat(rate) - 1.0) * 100);
+    const parsedRate = parseFloat(rate) || 1.0;
+    // Edge TTS Speech Service accepts prosody rate between -50% and +100% (0.5x to 2.0x).
+    const clampedRate = Math.max(0.5, Math.min(2.0, parsedRate));
+    const ratePercent = Math.round((clampedRate - 1.0) * 100);
     const rateStr = ratePercent >= 0 ? `+${ratePercent}%` : `${ratePercent}%`;
 
     const pitchHz = Math.round((parseFloat(pitch) - 1.0) * 50);

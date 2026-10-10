@@ -116,10 +116,48 @@ class TTSEngine {
     this.silentAudio.volume = 0.01;
   }
 
+  public getEffectivePlaybackRate(): number {
+    const voice = this.settings.voiceURI || '';
+    const isGoogle = voice.startsWith('google');
+    const requestedRate = typeof this.settings.rate === 'number' && !isNaN(this.settings.rate)
+      ? this.settings.rate
+      : 1.0;
+    const clamped = Math.max(0.5, Math.min(4.0, requestedRate));
+
+    if (isGoogle) {
+      // Google TTS API on server returns 1.0x audio.
+      // Client HTML5 audio element speeds it up to the exact requested rate!
+      return clamped;
+    }
+
+    // For Edge TTS, server synthesizes with rate up to 2.0x.
+    // For speeds > 2.0x, the client player handles the multiplier (e.g. 3.0 / 2.0 = 1.5).
+    if (clamped > 2.0) {
+      return clamped / 2.0;
+    }
+
+    return 1.0;
+  }
+
+  public applyPlaybackRate(audio: HTMLAudioElement | null) {
+    if (!audio) return;
+    try {
+      const effRate = this.getEffectivePlaybackRate();
+      if ('preservesPitch' in audio) {
+        (audio as any).preservesPitch = true;
+      }
+      audio.playbackRate = effRate;
+      audio.defaultPlaybackRate = effRate;
+    } catch (e) {
+      console.warn('Failed to apply playbackRate:', e);
+    }
+  }
+
   private createAudioElement(): HTMLAudioElement {
     const audio = new Audio();
     audio.preload = 'auto';
     audio.loop = false;
+    this.applyPlaybackRate(audio);
     return audio;
   }
 
@@ -127,6 +165,8 @@ class TTSEngine {
     this.audioPlayers = [this.createAudioElement(), this.createAudioElement()];
     this.activePlayerIndex = 0;
     this.playerLoadedSentenceIndex = [-1, -1];
+    this.applyPlaybackRate(this.audioPlayers[0]);
+    this.applyPlaybackRate(this.audioPlayers[1]);
   }
 
   private get activePlayer(): HTMLAudioElement {
@@ -209,8 +249,18 @@ class TTSEngine {
     }
 
     if (this.isOnlineVoice(voiceURI)) {
-      const url = `${getTtsApiBase()}/api/tts?voice=${encodeURIComponent(voiceURI)}&rate=${this.settings.rate}&pitch=${this.settings.pitch}&text=${encodeURIComponent(sampleText)}`;
+      const isGoogle = voiceURI.startsWith('google');
+      const serverRate = isGoogle ? 1.0 : Math.min(2.0, Math.max(0.5, this.settings.rate));
+      const url = `${getTtsApiBase()}/api/tts?voice=${encodeURIComponent(voiceURI)}&rate=${serverRate}&pitch=${this.settings.pitch}&text=${encodeURIComponent(sampleText)}`;
       this.testAudio = new Audio(url);
+      const effRate = isGoogle
+        ? Math.max(0.5, Math.min(4.0, this.settings.rate))
+        : (this.settings.rate > 2.0 ? this.settings.rate / 2.0 : 1.0);
+      if ('preservesPitch' in this.testAudio) {
+        (this.testAudio as any).preservesPitch = true;
+      }
+      this.testAudio.playbackRate = effRate;
+      this.testAudio.defaultPlaybackRate = effRate;
       await this.testAudio.play();
     } else {
       if (!this.synth) return;
@@ -238,8 +288,15 @@ class TTSEngine {
       this.setSleepTimer(newSettings.sleepTimerMinutes);
     }
 
-    // If voice, rate, or pitch changed:
-    if (voiceChanged || rateChanged || pitchChanged) {
+    // Immediately update live playbackRate on all players
+    this.applyPlaybackRate(this.audioPlayers[0]);
+    this.applyPlaybackRate(this.audioPlayers[1]);
+    this.applyPlaybackRate(this.testAudio);
+
+    const isGoogle = (this.settings.voiceURI || '').startsWith('google');
+
+    // For Google TTS, playbackRate change is 100% real-time and doesn't require restarting sentence!
+    if (voiceChanged || pitchChanged || (rateChanged && !isGoogle)) {
       this.clearAudioBlobCache();
       this.playerLoadedSentenceIndex = [-1, -1];
 
@@ -444,7 +501,9 @@ class TTSEngine {
 
   private getAudioUrl(sentenceText: string): string {
     const voice = this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural';
-    return `${getTtsApiBase()}/api/tts?voice=${encodeURIComponent(voice)}&rate=${this.settings.rate}&pitch=${this.settings.pitch}&text=${encodeURIComponent(sentenceText)}`;
+    const isGoogle = voice.startsWith('google');
+    const serverRate = isGoogle ? 1.0 : Math.min(2.0, Math.max(0.5, this.settings.rate));
+    return `${getTtsApiBase()}/api/tts?voice=${encodeURIComponent(voice)}&rate=${serverRate}&pitch=${this.settings.pitch}&text=${encodeURIComponent(sentenceText)}`;
   }
 
   /**
@@ -493,12 +552,16 @@ class TTSEngine {
 
     const setupNext = (blobOrUrl: string) => {
       if (currentToken !== this.playbackToken || this.state !== 'playing') return;
-      if (this.playerLoadedSentenceIndex[nextIdxP] === nextIdx) return;
+      if (this.playerLoadedSentenceIndex[nextIdxP] === nextIdx) {
+        this.applyPlaybackRate(nextP);
+        return;
+      }
 
       nextP.onended = null;
       nextP.onerror = null;
       nextP.src = blobOrUrl;
       nextP.preload = 'auto';
+      this.applyPlaybackRate(nextP);
       this.playerLoadedSentenceIndex[nextIdxP] = nextIdx;
       nextP.load();
     };
@@ -592,6 +655,9 @@ class TTSEngine {
         }
         this.playerLoadedSentenceIndex[activeIdx] = sentenceIdx;
       }
+
+      // Always guarantee correct effective playbackRate is applied before play()
+      this.applyPlaybackRate(player);
 
       // Safe play without triggering cascading errors on standard AbortError
       const playPromise = player.play();

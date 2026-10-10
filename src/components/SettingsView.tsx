@@ -746,12 +746,27 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
         {/* Speed, Pitch, and Behavior Controls */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
           <div>
-            <div className="flex justify-between text-xs text-zinc-400 mb-1.5">
-              <span>Tốc độ đọc</span>
-              <span className="font-bold text-amber-400">{ttsSettings.rate || 1.0}x</span>
+            <div className="flex justify-between items-center text-xs text-zinc-400 mb-1.5">
+              <span>Tốc độ đọc (0.5x - 4.0x)</span>
+              <span className="font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                {ttsSettings.rate || 1.0}x
+              </span>
             </div>
+            <input
+              type="range"
+              min="0.5"
+              max="4.0"
+              step="0.1"
+              value={ttsSettings.rate || 1.0}
+              onChange={(e) => {
+                const rate = parseFloat(e.target.value);
+                onUpdateTtsSettings({ rate });
+                ttsEngine.updateSettings({ rate });
+              }}
+              className="w-full h-1.5 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-amber-500 mb-2.5"
+            />
             <div className="grid grid-cols-5 gap-1.5">
-              {[0.8, 1.0, 1.25, 1.5, 2.0].map((rate) => (
+              {[0.8, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 3.0, 4.0].map((rate) => (
                 <button
                   key={rate}
                   type="button"
