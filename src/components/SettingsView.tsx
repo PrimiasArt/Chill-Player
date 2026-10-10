@@ -14,10 +14,14 @@ import {
   Copy,
   Check,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Play,
+  Loader2,
+  User
 } from 'lucide-react';
 import { db } from '../services/db';
 import { supabaseSync, type SupabaseConfig } from '../services/sync/supabaseSync';
+import { ttsEngine, type VoiceOption } from '../services/tts/ttsEngine';
 import type { ReaderSettings, TTSSettings } from '../types';
 
 interface SettingsViewProps {
@@ -46,11 +50,34 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [showSqlGuide, setShowSqlGuide] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
 
+  // TTS Voice state
+  const [testingVoiceId, setTestingVoiceId] = useState<string | null>(null);
+  const [voices, setVoices] = useState<VoiceOption[]>([]);
+
   useEffect(() => {
     supabaseSync.init().then(() => {
       setCloudConfig(supabaseSync.getConfig());
     });
+
+    setVoices(ttsEngine.getAllAvailableVoices());
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.onvoiceschanged = () => {
+        setVoices(ttsEngine.getAllAvailableVoices());
+      };
+    }
   }, []);
+
+  const handleTestVoice = async (voiceId: string) => {
+    if (testingVoiceId) return;
+    setTestingVoiceId(voiceId);
+    try {
+      await ttsEngine.testVoice(voiceId);
+    } catch (e) {
+      console.warn('Test voice error:', e);
+    } finally {
+      setTestingVoiceId(null);
+    }
+  };
 
   const handleTestConnection = async () => {
     if (!cloudConfig.url || !cloudConfig.anonKey) {
@@ -426,44 +453,196 @@ create policy "Allow all personal operations" on user_stories for all using (tru
         </div>
       </div>
 
-      {/* 4. TTS AUDIO DEFAULTS */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
-        <h3 className="font-semibold text-sm text-zinc-100 flex items-center gap-2">
-          <Volume2 className="w-4 h-4 text-amber-400" />
-          Mặc định nghe Audio (TTS)
-        </h3>
-        
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {/* 4. TTS AUDIO & VOICE SETTINGS */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-5">
+        <div className="flex items-center justify-between border-b border-zinc-800/80 pb-3">
           <div>
-            <label className="text-xs text-zinc-400 block mb-1">Tốc độ đọc mặc định</label>
-            <select
-              value={ttsSettings.rate}
-              onChange={(e) => onUpdateTtsSettings({ rate: Number(e.target.value) })}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-amber-500"
-            >
-              <option value="0.8">0.8x (Chậm)</option>
-              <option value="1.0">1.0x (Tự nhiên)</option>
-              <option value="1.25">1.25x (Hơi nhanh)</option>
-              <option value="1.5">1.5x (Nhanh)</option>
-              <option value="2.0">2.0x (Rất nhanh)</option>
-            </select>
+            <h3 className="font-semibold text-sm text-zinc-100 flex items-center gap-2">
+              <Volume2 className="w-4 h-4 text-amber-400" />
+              Cấu hình Giọng đọc Audio (TTS)
+            </h3>
+            <p className="text-xs text-zinc-400 mt-0.5">
+              Hỗ trợ giọng AI Neural truyền cảm tự nhiên, giọng Google và giọng có sẵn trên thiết bị
+            </p>
+          </div>
+        </div>
+
+        {/* Voice Selector with preview */}
+        <div className="space-y-3">
+          <label className="text-xs font-semibold text-zinc-300 block">
+            Chọn giọng đọc ưa thích:
+          </label>
+
+          <div className="space-y-2">
+            {voices.map((v) => {
+              const isSelected = (ttsSettings.voiceURI || 'edge:vi-VN-NamMinhNeural') === v.id;
+              const isTesting = testingVoiceId === v.id;
+
+              return (
+                <div
+                  key={v.id}
+                  onClick={() => {
+                    onUpdateTtsSettings({ voiceURI: v.id, engine: v.category });
+                    ttsEngine.updateSettings({ voiceURI: v.id, engine: v.category });
+                  }}
+                  className={`p-3.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                    isSelected
+                      ? 'bg-amber-500/10 border-amber-500/50 shadow-sm'
+                      : 'bg-zinc-800/50 border-zinc-700/60 hover:bg-zinc-800 hover:border-zinc-600'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                      isSelected 
+                        ? 'bg-amber-500 text-zinc-950 font-bold' 
+                        : 'bg-zinc-700 text-zinc-300'
+                    }`}>
+                      <User className="w-4 h-4" />
+                    </div>
+
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`text-xs font-bold ${isSelected ? 'text-amber-300' : 'text-zinc-200'}`}>
+                          {v.name}
+                        </span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                          v.category === 'ai' 
+                            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                            : v.category === 'google'
+                            ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                            : 'bg-zinc-700 text-zinc-300'
+                        }`}>
+                          {v.badge}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-zinc-400 mt-0.5 line-clamp-1">
+                        {v.description}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Audition / Test Button */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleTestVoice(v.id);
+                    }}
+                    disabled={isTesting}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 transition-all cursor-pointer ${
+                      isTesting
+                        ? 'bg-amber-500 text-zinc-950'
+                        : isSelected
+                        ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500 hover:text-zinc-950'
+                        : 'bg-zinc-700 hover:bg-zinc-600 text-zinc-200'
+                    }`}
+                  >
+                    {isTesting ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        Đang phát...
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-3.5 h-3.5 fill-current" />
+                        Nghe thử
+                      </>
+                    )}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Speed, Pitch, and Behavior Controls */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+          <div>
+            <div className="flex justify-between text-xs text-zinc-400 mb-1.5">
+              <span>Tốc độ đọc</span>
+              <span className="font-bold text-amber-400">{ttsSettings.rate || 1.0}x</span>
+            </div>
+            <div className="grid grid-cols-5 gap-1.5">
+              {[0.8, 1.0, 1.25, 1.5, 2.0].map((rate) => (
+                <button
+                  key={rate}
+                  type="button"
+                  onClick={() => {
+                    onUpdateTtsSettings({ rate });
+                    ttsEngine.updateSettings({ rate });
+                  }}
+                  className={`py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    (ttsSettings.rate || 1.0) === rate
+                      ? 'bg-amber-500 text-zinc-950 font-bold shadow-sm'
+                      : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                  }`}
+                >
+                  {rate}x
+                </button>
+              ))}
+            </div>
           </div>
 
           <div>
-            <label className="text-xs text-zinc-400 block mb-1">Tự động chuyển chương khi nghe xong</label>
-            <div className="flex items-center gap-2 pt-2">
-              <input
-                type="checkbox"
-                id="autoNext"
-                checked={ttsSettings.autoNextChapter}
-                onChange={(e) => onUpdateTtsSettings({ autoNextChapter: e.target.checked })}
-                className="w-4 h-4 accent-amber-500 rounded"
-              />
-              <label htmlFor="autoNext" className="text-xs text-zinc-300 cursor-pointer">
-                Bật tự động qua chương kế tiếp
-              </label>
+            <div className="flex justify-between text-xs text-zinc-400 mb-1.5">
+              <span>Cao độ giọng (Pitch)</span>
+              <span className="font-bold text-amber-400">
+                {(ttsSettings.pitch || 1.0) < 1.0 ? 'Trầm' : (ttsSettings.pitch || 1.0) > 1.0 ? 'Cao' : 'Chuẩn'}
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              {[
+                { label: 'Trầm ấm', val: 0.9 },
+                { label: 'Chuẩn', val: 1.0 },
+                { label: 'Trong trẻo', val: 1.1 }
+              ].map((p) => (
+                <button
+                  key={p.val}
+                  type="button"
+                  onClick={() => {
+                    onUpdateTtsSettings({ pitch: p.val });
+                    ttsEngine.updateSettings({ pitch: p.val });
+                  }}
+                  className={`py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    (ttsSettings.pitch || 1.0) === p.val
+                      ? 'bg-amber-500 text-zinc-950 font-bold shadow-sm'
+                      : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
             </div>
           </div>
+        </div>
+
+        {/* Feature Toggles */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 border-t border-zinc-800/80">
+          <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-zinc-300">
+            <input
+              type="checkbox"
+              checked={ttsSettings.autoNextChapter}
+              onChange={(e) => {
+                onUpdateTtsSettings({ autoNextChapter: e.target.checked });
+                ttsEngine.updateSettings({ autoNextChapter: e.target.checked });
+              }}
+              className="w-4 h-4 accent-amber-500 rounded"
+            />
+            <span>Tự động chuyển chương khi nghe xong</span>
+          </label>
+
+          <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-zinc-300">
+            <input
+              type="checkbox"
+              checked={ttsSettings.highlightSentence !== false}
+              onChange={(e) => {
+                onUpdateTtsSettings({ highlightSentence: e.target.checked });
+                ttsEngine.updateSettings({ highlightSentence: e.target.checked });
+              }}
+              className="w-4 h-4 accent-amber-500 rounded"
+            />
+            <span>Bôi sáng câu đang đọc trong văn bản</span>
+          </label>
         </div>
       </div>
 

@@ -43,9 +43,12 @@ export interface ReaderSettings {
   autoScrollSpeed: number; // 1 - 10
 }
 
+export type TTSEngineType = 'ai' | 'google' | 'browser';
+
 export interface TTSSettings {
   voiceURI: string;
-  rate: number; // 0.7 - 2.0
+  engine?: TTSEngineType;
+  rate: number; // 0.5 - 2.5
   pitch: number; // 0.8 - 1.2
   sleepTimerMinutes: number | null; // e.g. 15, 30, 45, or null
   highlightSentence: boolean;

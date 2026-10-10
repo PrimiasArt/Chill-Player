@@ -14,7 +14,8 @@ export const DEFAULT_READER_SETTINGS: ReaderSettings = {
 };
 
 export const DEFAULT_TTS_SETTINGS: TTSSettings = {
-  voiceURI: '',
+  voiceURI: 'edge:vi-VN-NamMinhNeural',
+  engine: 'ai',
   rate: 1.0,
   pitch: 1.0,
   sleepTimerMinutes: null,

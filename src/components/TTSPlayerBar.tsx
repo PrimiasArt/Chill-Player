@@ -55,7 +55,7 @@ export const TTSPlayerBar: React.FC<TTSPlayerBarProps> = ({
     return `${mins}:${remainder < 10 ? '0' : ''}${remainder}`;
   };
 
-  const viVoices = ttsEngine.getVietnameseVoices();
+  const allVoices = ttsEngine.getAllAvailableVoices();
 
   const progressPercent = totalSentences > 0 
     ? Math.min(100, Math.round(((sentenceIndex + 1) / totalSentences) * 100)) 
@@ -303,22 +303,23 @@ export const TTSPlayerBar: React.FC<TTSPlayerBarProps> = ({
               </div>
             </div>
 
-            {/* Vietnamese Voice Selector */}
-            {viVoices.length > 0 && (
+            {/* Voice Selector */}
+            {allVoices.length > 0 && (
               <div className="w-full">
-                <label className="text-xs text-zinc-400 block mb-1.5">Giọng đọc tiếng Việt</label>
+                <label className="text-xs text-zinc-400 block mb-1.5">Giọng đọc Audio</label>
                 <select
-                  value={settings.voiceURI}
+                  value={settings.voiceURI || 'edge:vi-VN-NamMinhNeural'}
                   onChange={(e) => {
                     const voiceURI = e.target.value;
-                    onUpdateSettings({ voiceURI });
-                    ttsEngine.updateSettings({ voiceURI });
+                    const v = allVoices.find(x => x.id === voiceURI);
+                    onUpdateSettings({ voiceURI, engine: v?.category });
+                    ttsEngine.updateSettings({ voiceURI, engine: v?.category });
                   }}
                   className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-amber-500"
                 >
-                  {viVoices.map((v) => (
-                    <option key={v.voiceURI} value={v.voiceURI}>
-                      {v.name} ({v.lang})
+                  {allVoices.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name} • {v.badge}
                     </option>
                   ))}
                 </select>

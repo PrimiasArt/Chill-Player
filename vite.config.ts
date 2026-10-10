@@ -11,6 +11,37 @@ export default defineConfig({
       name: 'local-crawler-api',
       configureServer(server) {
         server.middlewares.use(async (req, res, next) => {
+          if (req.url && req.url.startsWith('/api/tts')) {
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', async () => {
+              try {
+                if (body) {
+                  try { (req as any).body = JSON.parse(body); } catch {}
+                }
+                const mockRes = {
+                  statusCode: 200,
+                  setHeader(k: string, v: string) { res.setHeader(k, v); },
+                  status(code: number) { res.statusCode = code; return this; },
+                  send(data: any) { res.end(data); },
+                  json(data: any) {
+                    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+                    res.end(JSON.stringify(data));
+                  },
+                  end(data?: any) { res.end(data); }
+                };
+                // @ts-ignore
+                const { default: ttsHandler } = await import('./api/tts.js');
+                await ttsHandler(req, mockRes);
+              } catch (err: any) {
+                res.statusCode = 500;
+                res.setHeader('Content-Type', 'application/json; charset=utf-8');
+                res.end(JSON.stringify({ success: false, error: err.message }));
+              }
+            });
+            return;
+          }
+
           if (req.url && req.url.startsWith('/api/crawler')) {
             let body = '';
             req.on('data', chunk => { body += chunk; });
