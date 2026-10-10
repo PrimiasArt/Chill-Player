@@ -28,12 +28,10 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+          cache: 'gradle'
 
       - name: Install Node Dependencies
-        run: npm ci
+        run: npm install
 
       - name: Build Web App (Vite)
         run: npm run build
