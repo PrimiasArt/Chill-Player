@@ -784,7 +784,10 @@ class TTSEngine {
           this.currentChapterTitle || 'Đang nghe truyện',
           this.currentBookTitle || 'Chill Reader',
           this.currentAuthor || '',
-          isPlaying
+          isPlaying,
+          this.currentCoverUrl || '',
+          Math.floor(this.currentSentenceIndex || 0),
+          Math.floor(this.sentences.length || 0)
         );
       }
     } catch (e) {
