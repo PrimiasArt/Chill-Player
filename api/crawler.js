@@ -25,12 +25,33 @@ function decodeHtmlEntities(str) {
     .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
 }
 
-function cleanChapterContent(html) {
-  // Primary: TruyenHH3D uses <article class="art">
+function cleanWetruyenText(rawHtml) {
+  if (!rawHtml) return '';
+  let clean = decodeHtmlEntities(
+    rawHtml
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<p[^>]*>/gi, '')
+      .replace(/<\/p>/gi, '\n\n')
+      .replace(/<[^>]+>/g, '')
+  );
+
+  clean = clean
+    .replace(/Bạn đang đọc truyện tại:?[^\n]+/gi, '')
+    .replace(/Truyện được cập nhật tại[^\n]+/gi, '')
+    .replace(/Chúc bạn đọc truyện vui vẻ[^\n]*/gi, '')
+    .replace(/Nguồn:[^\n]+/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  return clean;
+}
+
+function cleanHH3DText(html) {
   const artMatch = html.match(/<article[^>]+class="art"[^>]*>([\s\S]*?)<\/article>/i);
   const containerHtml = artMatch ? artMatch[1] : html;
 
-  // Extract paragraphs
   const pMatches = [...containerHtml.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)]
     .map(m => decodeHtmlEntities(m[1].replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').trim()))
     .filter(s => {
@@ -44,7 +65,6 @@ function cleanChapterContent(html) {
     return pMatches.join('\n\n');
   }
 
-  // Fallback container extraction
   const cMatch = html.match(/<div[^>]+class="[^"]*(?:chapter-c|chapter-content|reading-content|content)[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
   if (cMatch) {
     let text = decodeHtmlEntities(cMatch[1].replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, ''));
@@ -54,73 +74,180 @@ function cleanChapterContent(html) {
   return '';
 }
 
+// ---------------------- SEARCH ----------------------
 async function handleSearch(keyword) {
-  const url = `https://truyenhh3d.com/tim-kiem?q=${encodeURIComponent(keyword)}`;
-  const res = await fetch(url, { headers: BROWSER_HEADERS });
-  if (!res.ok) throw new Error(`Lỗi tìm kiếm: HTTP ${res.status}`);
-  const html = await res.text();
-
-  const cardRegex = /<a[^>]+class="card-novel"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  const trimmed = keyword.trim();
   const results = [];
-  let match;
 
-  while ((match = cardRegex.exec(html)) !== null) {
-    const urlPath = match[1];
-    const inner = match[2];
+  // Try WeTruyen (Dtruyen) first - fast, unblocked on Vercel
+  try {
+    const url = `https://wetruyen.com/tim-kiem/?tukhoa=${encodeURIComponent(trimmed)}`;
+    const res = await fetch(url, { headers: BROWSER_HEADERS, signal: AbortSignal.timeout(8000) });
+    if (res.ok) {
+      const html = await res.text();
+      const rows = html.split('<div class="row" itemscope');
 
-    const titleMatch = inner.match(/<h3[^>]*>([\s\S]*?)<\/h3>/i);
-    const title = titleMatch ? decodeHtmlEntities(titleMatch[1].replace(/<[^>]+>/g, '').trim()) : '';
+      for (let i = 1; i < rows.length; i++) {
+        const block = rows[i];
+        const titleM = block.match(/<h3 class="truyen-title"[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"[^>]*title="([^"]+)"/i) ||
+                       block.match(/<a[^>]+href="([^"]+)"[^>]*title="([^"]+)"/i);
+        if (!titleM) continue;
 
-    const metaMatch = inner.match(/<div class="meta"[^>]*>([\s\S]*?)<\/div>/i);
-    const meta = metaMatch ? decodeHtmlEntities(metaMatch[1].replace(/<[^>]+>/g, '').trim()) : '';
+        const sourceUrl = titleM[1];
+        const title = decodeHtmlEntities(titleM[2].trim());
 
-    const coverMatch = inner.match(/<img[^>]+src="([^"]+)"/i);
-    let coverUrl = coverMatch ? coverMatch[1] : '';
-    if (coverUrl && !coverUrl.startsWith('http')) {
-      coverUrl = 'https://truyenhh3d.com' + coverUrl;
+        const authorM = block.match(/itemprop="author"[^>]*>([\s\S]*?)(?:<\/div>|<span class="author">)/i) ||
+                        block.match(/<span class="author"[^>]*itemprop="author"[^>]*>([\s\S]*?)<\/span>/i);
+        const author = authorM ? decodeHtmlEntities(authorM[1].replace(/<[^>]+>/g, '').trim()) : 'Đang cập nhật';
+
+        const chM = block.match(/(\d+)\s*chương/i);
+        const latestChapter = chM ? `${chM[1]} chương` : '';
+
+        const coverM = block.match(/data-desk-image="([^"]+)"/i) ||
+                       block.match(/data-image="([^"]+)"/i) ||
+                       block.match(/src="([^"]*(?:covers|medias)[^"]*)"/i);
+        const coverUrl = coverM ? coverM[1] : '';
+
+        const slug = sourceUrl.split('/').filter(Boolean).pop() || '';
+
+        results.push({
+          id: `wt-${slug}`,
+          title,
+          author,
+          coverUrl,
+          description: latestChapter ? `${latestChapter} · Đọc miễn phí` : '',
+          latestChapter,
+          sourceUrl,
+          sourceName: 'WeTruyen'
+        });
+      }
     }
+  } catch (err) {
+    console.warn('WeTruyen search failed, trying fallback:', err.message);
+  }
 
-    if (title) {
-      const slug = urlPath.replace('/truyen/', '').replace('/', '');
-      results.push({
-        id: `hh3d-${slug}`,
-        title,
-        author: 'Đang cập nhật',
-        coverUrl,
-        description: meta,
-        latestChapter: meta,
-        sourceUrl: 'https://truyenhh3d.com' + urlPath,
-        sourceName: 'TruyenHH3D'
-      });
+  // If WeTruyen returned results, return them
+  if (results.length > 0) {
+    return results;
+  }
+
+  // Fallback: Try TruyenHH3D (for local dev / residential IPs)
+  try {
+    const url = `https://truyenhh3d.com/tim-kiem?q=${encodeURIComponent(trimmed)}`;
+    const res = await fetch(url, { headers: BROWSER_HEADERS, signal: AbortSignal.timeout(8000) });
+    if (res.ok) {
+      const html = await res.text();
+      const cardRegex = /<a[^>]+class="card-novel"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+      let match;
+
+      while ((match = cardRegex.exec(html)) !== null) {
+        const urlPath = match[1];
+        const inner = match[2];
+
+        const titleMatch = inner.match(/<h3[^>]*>([\s\S]*?)<\/h3>/i);
+        const title = titleMatch ? decodeHtmlEntities(titleMatch[1].replace(/<[^>]+>/g, '').trim()) : '';
+
+        const metaMatch = inner.match(/<div class="meta"[^>]*>([\s\S]*?)<\/div>/i);
+        const meta = metaMatch ? decodeHtmlEntities(metaMatch[1].replace(/<[^>]+>/g, '').trim()) : '';
+
+        const coverMatch = inner.match(/<img[^>]+src="([^"]+)"/i);
+        let coverUrl = coverMatch ? coverMatch[1] : '';
+        if (coverUrl && !coverUrl.startsWith('http')) {
+          coverUrl = 'https://truyenhh3d.com' + coverUrl;
+        }
+
+        if (title) {
+          const slug = urlPath.replace('/truyen/', '').replace('/', '');
+          results.push({
+            id: `hh3d-${slug}`,
+            title,
+            author: 'Đang cập nhật',
+            coverUrl,
+            description: meta,
+            latestChapter: meta,
+            sourceUrl: 'https://truyenhh3d.com' + urlPath,
+            sourceName: 'TruyenHH3D'
+          });
+        }
+      }
     }
+  } catch (err) {
+    console.warn('TruyenHH3D search fallback failed:', err.message);
   }
 
   return results;
 }
 
+// ---------------------- DETAIL ----------------------
 async function handleStoryDetail(storyUrl) {
-  const res = await fetch(storyUrl, { headers: BROWSER_HEADERS });
+  const isWetruyen = storyUrl.includes('wetruyen.com') || storyUrl.includes('dtruyen.com');
+
+  if (isWetruyen) {
+    const res = await fetch(storyUrl, { headers: BROWSER_HEADERS, signal: AbortSignal.timeout(10000) });
+    if (!res.ok) throw new Error(`Lỗi tải thông tin truyện: HTTP ${res.status}`);
+    const html = await res.text();
+
+    const titleM = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+    const title = titleM ? decodeHtmlEntities(titleM[1].replace(/<[^>]+>/g, '').trim()) : 'Truyện Online';
+
+    const authorM = html.match(/itemprop="author"[^>]*>([\s\S]*?)<\/(?:a|span)>/i) ||
+                    html.match(/Tác giả:[^<]*<a[^>]*>([\s\S]*?)<\/a>/i);
+    const author = authorM ? decodeHtmlEntities(authorM[1].replace(/<[^>]+>/g, '').trim()) : 'Đang cập nhật';
+
+    const coverM = html.match(/<img[^>]+itemprop="image"[^>]+src="([^"]+)"/i) ||
+                   html.match(/src="([^"]*(?:covers|medias)[^"]*)"/i);
+    const coverUrl = coverM ? coverM[1] : '';
+
+    const descM = html.match(/class="desc-text"[^>]*>([\s\S]*?)<\/div>/i) ||
+                  html.match(/itemprop="description"[^>]*>([\s\S]*?)<\/div>/i);
+    const description = descM ? decodeHtmlEntities(descM[1].replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').trim()) : '';
+
+    // Total chapters count
+    const totalM = html.match(/(\d+)\s*chương/i);
+    const totalChapters = totalM ? parseInt(totalM[1]) : 50;
+
+    // Base slug for chapters: e.g. https://wetruyen.com/dau-pha-thuong-khung.12/ => https://wetruyen.com/dau-pha-thuong-khung
+    const baseSlug = storyUrl.replace(/\.\d+\/?$/, '').replace(/\/$/, '');
+
+    const chapters = [];
+    for (let i = 1; i <= Math.min(totalChapters, 1500); i++) {
+      chapters.push({
+        number: i,
+        title: `Chương ${i}`,
+        url: `${baseSlug}/chuong-${i}.html`
+      });
+    }
+
+    return {
+      title,
+      author,
+      coverUrl,
+      description,
+      sourceUrl,
+      totalChapters: chapters.length,
+      chapters
+    };
+  }
+
+  // TruyenHH3D handler
+  const res = await fetch(storyUrl, { headers: BROWSER_HEADERS, signal: AbortSignal.timeout(10000) });
   if (!res.ok) throw new Error(`Lỗi tải thông tin truyện: HTTP ${res.status}`);
   const html = await res.text();
 
-  // Title
   const titleMatch = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
   const title = titleMatch ? decodeHtmlEntities(titleMatch[1].replace(/<[^>]+>/g, '').trim()) : 'Truyện Online';
 
-  // Author
   const authorMatch = html.match(/class="author-link"[^>]*>([\s\S]*?)<\/a>/i) ||
                       html.match(/Tác giả:?[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/i) ||
                       html.match(/Tác giả:?\s*([^<\n]+)/i);
   const author = authorMatch ? decodeHtmlEntities(authorMatch[1].replace(/<[^>]+>/g, '').trim()) : 'Đang cập nhật';
 
-  // Cover
   const coverMatch = html.match(/<img[^>]+(?:class="[^"]*cover[^"]*"|src="([^"]*(?:covers|images)[^"]*)")/i);
   let coverUrl = coverMatch ? (coverMatch[1] || coverMatch[0]) : '';
   if (coverUrl && !coverUrl.startsWith('http')) {
     coverUrl = 'https://truyenhh3d.com' + coverUrl;
   }
 
-  // Synopsis
   const synopsisMatch = html.match(/class="synopsis"[^>]*>([\s\S]*?)<\/div>/i);
   let description = '';
   if (synopsisMatch) {
@@ -130,11 +257,9 @@ async function handleStoryDetail(storyUrl) {
     description = cleanP.join('\n\n');
   }
 
-  // Chapter count & dropdown pages
   const totalChMatch = html.match(/(\d+)\s*chương/i);
   const declaredTotalChapters = totalChMatch ? parseInt(totalChMatch[1]) : 0;
 
-  // Extract chapters from page 1
   const chapterLinks = [...html.matchAll(/<a[^>]+href="(\/truyen\/[^"]*\/chuong-(\d+))"[^>]*>([\s\S]*?)<\/a>/gi)];
   const chapters = [];
   const seen = new Set();
@@ -153,8 +278,6 @@ async function handleStoryDetail(storyUrl) {
 
   chapters.sort((a, b) => a.number - b.number);
 
-  // If story has declared total chapters greater than page 1 (100 chapters),
-  // generate remaining chapter URLs based on the standard pattern
   const baseStorySlug = storyUrl.replace('https://truyenhh3d.com', '').replace(/\/$/, '');
   const totalToBuild = Math.max(declaredTotalChapters, chapters.length);
   if (totalToBuild > chapters.length) {
@@ -178,7 +301,10 @@ async function handleStoryDetail(storyUrl) {
   };
 }
 
+// ---------------------- CHAPTER ----------------------
 async function handleChapter(chapterUrl, retries = 2) {
+  const isWetruyen = chapterUrl.includes('wetruyen.com') || chapterUrl.includes('dtruyen.com');
+
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const res = await fetch(chapterUrl, { 
@@ -188,10 +314,30 @@ async function handleChapter(chapterUrl, retries = 2) {
       if (!res.ok) throw new Error(`Lỗi tải chương: HTTP ${res.status}`);
       const html = await res.text();
 
+      if (isWetruyen) {
+        const titleM = html.match(/class="chapter-title"[^>]*>([\s\S]*?)<\/a>/i) ||
+                       html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) ||
+                       html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+        const title = titleM ? decodeHtmlEntities(titleM[1].replace(/<[^>]+>/g, '').trim()) : '';
+
+        const cM = html.match(/class="chapter-c"[^>]*>([\s\S]*?)<\/div>/i);
+        if (!cM) throw new Error('Không tìm thấy nội dung chương.');
+
+        const content = cleanWetruyenText(cM[1]);
+        if (!content) throw new Error('Nội dung chương trống.');
+
+        return {
+          title,
+          content,
+          wordCount: content.split(/\s+/).length
+        };
+      }
+
+      // HH3D chapter
       const titleMatch = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) || html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
       const title = titleMatch ? decodeHtmlEntities(titleMatch[1].replace(/<[^>]+>/g, '').trim()) : '';
 
-      const content = cleanChapterContent(html);
+      const content = cleanHH3DText(html);
       if (!content) {
         throw new Error('Nội dung chương trống hoặc không tìm thấy.');
       }
@@ -209,7 +355,6 @@ async function handleChapter(chapterUrl, retries = 2) {
 }
 
 async function handleBatchChapters(urls) {
-  // Fetch with concurrency pool of 6
   const results = [];
   const concurrency = 6;
   
@@ -245,26 +390,6 @@ export default async function handler(req, res) {
   try {
     const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     const action = urlObj.searchParams.get('action') || (req.body && req.body.action);
-
-    if (action === 'probe') {
-      const tests = [
-        'https://dtruyen.com/tim-kiem/?q=dau+pha',
-        'https://dtruyen.com/dau-pha-thuong-khung/',
-        'https://dtruyen.com/dau-pha-thuong-khung/chuong-1/'
-      ];
-      const results = {};
-      for (const t of tests) {
-        try {
-          const resp = await fetch(t, { headers: BROWSER_HEADERS, signal: AbortSignal.timeout(6000) });
-          const text = await resp.text();
-          results[t] = { status: resp.status, len: text.length, preview: text.slice(0, 150) };
-        } catch(e) {
-          results[t] = { error: e.message };
-        }
-      }
-      res.status(200).json({ success: true, results });
-      return;
-    }
 
     if (action === 'search') {
       const q = urlObj.searchParams.get('q') || '';

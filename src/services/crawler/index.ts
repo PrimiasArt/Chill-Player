@@ -32,41 +32,41 @@ export const POPULAR_RECOMMENDED_STORIES: CrawlSearchResult[] = [
     id: 'dau-pha-thuong-khung',
     title: 'Đấu Phá Thương Khung',
     author: 'Thiên Tàm Thổ Đậu',
-    coverUrl: 'https://truyenhh3d.com/static/covers/t320/dau-pha-thuong-khung.jpg.webp?v=1790436119',
+    coverUrl: 'https://cdn.wetruyen.com/medias/covers/0/12-dau-pha-thuong-khung_cover_large.jpg',
     description: 'Đây là thế giới thuộc về Đấu Khí, không có ma pháp hoa lệ, chỉ có đấu khí đã phồn thịnh tới đỉnh cao!',
-    latestChapter: '1638 chương · Hoàn thành',
-    sourceUrl: 'https://truyenhh3d.com/truyen/dau-pha-thuong-khung',
-    sourceName: 'TruyenHH3D'
+    latestChapter: '1641 chương · Hoàn thành',
+    sourceUrl: 'https://wetruyen.com/dau-pha-thuong-khung.12/',
+    sourceName: 'WeTruyen'
   },
   {
     id: 'pham-nhan-tu-tien',
     title: 'Phàm Nhân Tu Tiên',
     author: 'Vong Ngữ',
-    coverUrl: 'https://truyenhh3d.com/static/covers/t320/pham-nhan-tu-tien.jpg.webp',
+    coverUrl: 'https://cdn.wetruyen.com/medias/covers/0/21-pham-nhan-tu-tien_cover_large.jpg',
     description: 'Một thiếu niên bình thường nơi thôn quê nghèo khó, tình cờ bước vào con đường tu tiên đầy chông gai...',
-    latestChapter: '2468 chương · Hoàn thành',
-    sourceUrl: 'https://truyenhh3d.com/truyen/pham-nhan-tu-tien',
-    sourceName: 'TruyenHH3D'
+    latestChapter: '2446 chương · Hoàn thành',
+    sourceUrl: 'https://wetruyen.com/pham-nhan-tu-tien.21/',
+    sourceName: 'WeTruyen'
   },
   {
     id: 'muc-than-ky',
     title: 'Mục Thần Ký',
     author: 'Trạch Trư',
-    coverUrl: 'https://truyenhh3d.com/static/covers/t320/muc-than-ky.jpg.webp',
+    coverUrl: 'https://cdn.wetruyen.com/medias/covers/3/3570-muc-than-ky_cover_large.jpg',
     description: 'Đại Khư tàn tích, đêm tối buông xuống, bóng tối thôn phệ vạn vật...',
     latestChapter: '1830 chương · Hoàn thành',
-    sourceUrl: 'https://truyenhh3d.com/truyen/muc-than-ky',
-    sourceName: 'TruyenHH3D'
+    sourceUrl: 'https://wetruyen.com/muc-than-ky.3570/',
+    sourceName: 'WeTruyen'
   },
   {
-    id: 'quang-am-chi-ngoai',
-    title: 'Quang Âm Chi Ngoại',
-    author: 'Nhĩ Căn',
-    coverUrl: 'https://truyenhh3d.com/static/covers/t320/quang-am-chi-ngoai.jpg.webp',
-    description: 'Thần linh mở mắt, nhân gian hóa kiếp. Thiếu niên Hứa Thanh đạp lên con đường sinh tồn...',
-    latestChapter: '2100+ chương · Đang ra',
-    sourceUrl: 'https://truyenhh3d.com/truyen/quang-am-chi-ngoai',
-    sourceName: 'TruyenHH3D'
+    id: 'quy-bi-chi-chu',
+    title: 'Quỷ Bí Chi Chủ (Lord of Mysteries)',
+    author: 'Ái Tiềm Thủy Đích Ô Tặc',
+    coverUrl: 'https://cdn.wetruyen.com/medias/covers/3/3941-quy-bi-chi-chu_cover_large.jpg',
+    description: 'Trong làn sương mù mờ ảo của hơi nước và máy móc, ai có thể tiếp cận được siêu phàm...',
+    latestChapter: '1432 chương · Hoàn thành',
+    sourceUrl: 'https://wetruyen.com/quy-bi-chi-chu.3941/',
+    sourceName: 'WeTruyen'
   }
 ];
 
