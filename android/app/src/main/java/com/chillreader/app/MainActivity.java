@@ -392,7 +392,6 @@ public class MainActivity extends BridgeActivity {
             mediaStyle.setMediaSession(mediaSession.getSessionToken());
         }
         mediaStyle.setShowActionsInCompactView(0, 1, 2);
-        mediaStyle.setShowCancelButton(true, pendingStop);
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
