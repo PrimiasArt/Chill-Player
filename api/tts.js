@@ -30,11 +30,27 @@ export default async function handler(req, res) {
       return;
     }
 
-    const cleanText = text.trim();
+    let sanitizedText = text
+      .trim()
+      .replace(/&amp;/gi, ' và ')
+      .replace(/&/g, ' và ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/[<>]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    // If text has no readable alphanumeric characters, return short silent MP3
+    if (!/[a-zA-Z0-9\u00C0-\u1EF9]/.test(sanitizedText)) {
+      const silentMp3 = Buffer.from('//uQxAAAAANIAAAAAExBTUUzLjEwMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', 'base64');
+      res.setHeader('Content-Type', 'audio/mpeg');
+      res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=86400');
+      res.status(200).send(silentMp3);
+      return;
+    }
 
     // 1. Google Translate TTS Provider
     if (voice === 'google' || voice === 'google:vi') {
-      const googleUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=vi&client=tw-ob&q=${encodeURIComponent(cleanText)}`;
+      const googleUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=vi&client=tw-ob&q=${encodeURIComponent(sanitizedText)}`;
       const gRes = await fetch(googleUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -62,27 +78,49 @@ export default async function handler(req, res) {
     const pitchHz = Math.round((parseFloat(pitch) - 1.0) * 50);
     const pitchStr = pitchHz >= 0 ? `+${pitchHz}Hz` : `${pitchHz}Hz`;
 
-    const comm = new Communicate(cleanText, {
-      voice: cleanVoice,
-      rate: rateStr,
-      pitch: pitchStr
+    try {
+      const comm = new Communicate(sanitizedText, {
+        voice: cleanVoice,
+        rate: rateStr,
+        pitch: pitchStr
+      });
+
+      const chunks = [];
+      for await (const chunk of comm.stream()) {
+        if (chunk.type === 'audio' && chunk.data) {
+          chunks.push(chunk.data);
+        }
+      }
+
+      if (chunks.length > 0) {
+        const audioBuffer = Buffer.concat(chunks);
+        res.setHeader('Content-Type', 'audio/mpeg');
+        res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=86400');
+        res.status(200).send(audioBuffer);
+        return;
+      }
+    } catch (edgeErr) {
+      console.warn('Edge TTS synthesis failed, attempting Google fallback:', edgeErr);
+    }
+
+    // Fallback to Google Translate TTS
+    const fallbackUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=vi&client=tw-ob&q=${encodeURIComponent(sanitizedText)}`;
+    const fRes = await fetch(fallbackUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      },
+      signal: AbortSignal.timeout(10000)
     });
 
-    const chunks = [];
-    for await (const chunk of comm.stream()) {
-      if (chunk.type === 'audio' && chunk.data) {
-        chunks.push(chunk.data);
-      }
+    if (fRes.ok) {
+      const arrayBuffer = await fRes.arrayBuffer();
+      res.setHeader('Content-Type', 'audio/mpeg');
+      res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=86400');
+      res.status(200).send(Buffer.from(arrayBuffer));
+      return;
     }
 
-    if (chunks.length === 0) {
-      throw new Error('Không nhận được dữ liệu âm thanh từ Edge TTS.');
-    }
-
-    const audioBuffer = Buffer.concat(chunks);
-    res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=86400');
-    res.status(200).send(audioBuffer);
+    throw new Error('Không thể tạo âm thanh từ cả Edge TTS và Google TTS.');
   } catch (err) {
     console.error('TTS API error:', err);
     res.status(500).json({ error: err.message || 'Lỗi tạo âm thanh TTS.' });

@@ -56,6 +56,7 @@ const API_BASE = (typeof window !== 'undefined' && window.location.origin.starts
 
 class TTSEngine {
   private synth: SpeechSynthesis | null = null;
+  private currentUtterance: SpeechSynthesisUtterance | null = null;
   private sentences: string[] = [];
   private currentSentenceIndex = 0;
   private state: TTSState = 'idle';
@@ -64,13 +65,18 @@ class TTSEngine {
   private sleepTimerSeconds: number | null = null;
   private sleepCountdownInterval: number | null = null;
 
-  // Online audio elements
+  // Audio player & Blob caching for zero-latency gapless playback
   private audioPlayer: HTMLAudioElement | null = null;
-  private prefetchAudio: HTMLAudioElement | null = null;
   private testAudio: HTMLAudioElement | null = null;
-
-  // Silent audio player to keep mobile browser audio context alive in the background
   private silentAudio: HTMLAudioElement | null = null;
+
+  // Blob cache maps sentence index -> object URL
+  private audioBlobCache: Map<number, string> = new Map();
+  private fetchingSentences: Set<number> = new Set();
+
+  // Guard against race conditions and obsolete callbacks
+  private playbackToken = 0;
+  private consecutiveErrors = 0;
 
   // Metadata for MediaSession
   private currentBookTitle = '';
@@ -99,6 +105,7 @@ class TTSEngine {
   }
 
   private setupSilentAudio() {
+    // 1-sample silent wav to keep mobile browser audio context alive
     const silentWavBase64 = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
     this.silentAudio = new Audio(silentWavBase64);
     this.silentAudio.loop = true;
@@ -108,26 +115,12 @@ class TTSEngine {
   private setupAudioPlayer() {
     this.audioPlayer = new Audio();
     this.audioPlayer.preload = 'auto';
-
-    this.audioPlayer.addEventListener('ended', () => {
-      if (this.state === 'playing') {
-        this.currentSentenceIndex++;
-        this.speakCurrentSentence();
-      }
-    });
-
-    this.audioPlayer.addEventListener('error', (e) => {
-      console.warn('Online audio player error:', e);
-      if (this.state === 'playing') {
-        this.currentSentenceIndex++;
-        this.speakCurrentSentence();
-      }
-    });
+    this.audioPlayer.loop = false; // Never repeat a sentence in a loop
   }
 
   public isOnlineVoice(voiceURI?: string): boolean {
     const v = voiceURI !== undefined ? voiceURI : this.settings.voiceURI;
-    if (!v) return true; // Default to online Edge Nam Minh
+    if (!v) return true;
     return v.startsWith('edge:') || v.startsWith('google:') || v.startsWith('vi-VN-');
   }
 
@@ -138,13 +131,14 @@ class TTSEngine {
 
   public getVietnameseVoices(): SpeechSynthesisVoice[] {
     const all = this.getVoices();
-    const vi = all.filter(v => v.lang.toLowerCase().startsWith('vi') || v.name.toLowerCase().includes('vietnam') || v.name.toLowerCase().includes('tiếng việt'));
+    const vi = all.filter(v => 
+      v.lang.toLowerCase().startsWith('vi') || 
+      v.name.toLowerCase().includes('vietnam') || 
+      v.name.toLowerCase().includes('tiếng việt')
+    );
     return vi.length > 0 ? vi : all;
   }
 
-  /**
-   * Get complete list of all voices (AI Neural, Google, and Browser local voices)
-   */
   public getAllAvailableVoices(): VoiceOption[] {
     const list: VoiceOption[] = [...CURATED_VOICES];
 
@@ -167,18 +161,22 @@ class TTSEngine {
   }
 
   /**
-   * Test / preview a voice with a sample sentence
+   * Preview a voice with a sample sentence in Settings
    */
   public async testVoice(
     voiceURI: string, 
     sampleText = 'Xin chào, bạn đang nghe thử giọng đọc trên ứng dụng Chill Reader.'
   ): Promise<void> {
-    // Stop any existing test
     if (this.testAudio) {
       this.testAudio.pause();
+      this.testAudio.src = '';
       this.testAudio = null;
     }
     if (this.synth) {
+      if (this.currentUtterance) {
+        this.currentUtterance.onend = null;
+        this.currentUtterance.onerror = null;
+      }
       this.synth.cancel();
     }
 
@@ -189,6 +187,7 @@ class TTSEngine {
     } else {
       if (!this.synth) return;
       const utterance = new SpeechSynthesisUtterance(sampleText);
+      this.currentUtterance = utterance;
       utterance.rate = this.settings.rate;
       utterance.pitch = this.settings.pitch;
       const voice = this.getVoices().find(v => v.voiceURI === voiceURI);
@@ -198,7 +197,17 @@ class TTSEngine {
   }
 
   public updateSettings(newSettings: Partial<TTSSettings>) {
+    const oldVoice = this.settings.voiceURI;
+    const oldRate = this.settings.rate;
+    const oldPitch = this.settings.pitch;
+
     this.settings = { ...this.settings, ...newSettings };
+
+    // If voice, rate, or pitch changed, clear prefetched blob audio cache
+    if (newSettings.voiceURI !== oldVoice || newSettings.rate !== oldRate || newSettings.pitch !== oldPitch) {
+      this.clearAudioBlobCache();
+    }
+
     if (newSettings.sleepTimerMinutes !== undefined) {
       this.setSleepTimer(newSettings.sleepTimerMinutes);
     }
@@ -228,6 +237,16 @@ class TTSEngine {
     this.listeners.forEach(l => l.onTimeRemainingUpdate?.(seconds));
   }
 
+  private clearAudioBlobCache() {
+    this.audioBlobCache.forEach((url) => {
+      try {
+        URL.revokeObjectURL(url);
+      } catch {}
+    });
+    this.audioBlobCache.clear();
+    this.fetchingSentences.clear();
+  }
+
   /**
    * Set chapter text and start or jump
    */
@@ -237,13 +256,15 @@ class TTSEngine {
     startFromSentenceIndex: number = 0
   ) {
     this.stop();
+    this.clearAudioBlobCache();
+
     this.currentBookTitle = metadata.title;
     this.currentAuthor = metadata.author;
     this.currentChapterTitle = metadata.chapterTitle;
     this.currentCoverUrl = metadata.coverUrl || '';
 
     this.sentences = this.splitIntoSentences(content);
-    this.currentSentenceIndex = Math.max(0, Math.min(startFromSentenceIndex, this.sentences.length - 1));
+    this.currentSentenceIndex = Math.max(0, Math.min(startFromSentenceIndex, Math.max(0, this.sentences.length - 1)));
     this.updateMediaSessionMetadata();
   }
 
@@ -261,12 +282,14 @@ class TTSEngine {
       return;
     }
 
+    this.consecutiveErrors = 0;
     this.silentAudio?.play().catch(() => {});
     this.notifyState('playing');
     this.speakCurrentSentence();
   }
 
   public pause() {
+    this.playbackToken++; // Invalidate pending callbacks
     if (this.isOnlineVoice() && this.audioPlayer) {
       this.audioPlayer.pause();
     } else if (this.synth) {
@@ -277,11 +300,18 @@ class TTSEngine {
   }
 
   public stop() {
+    this.playbackToken++; // Invalidate pending callbacks
     if (this.audioPlayer) {
+      this.audioPlayer.onended = null;
+      this.audioPlayer.onerror = null;
       this.audioPlayer.pause();
       this.audioPlayer.src = '';
     }
     if (this.synth) {
+      if (this.currentUtterance) {
+        this.currentUtterance.onend = null;
+        this.currentUtterance.onerror = null;
+      }
       this.synth.cancel();
     }
     this.silentAudio?.pause();
@@ -320,58 +350,149 @@ class TTSEngine {
     }
   }
 
+  /**
+   * Prefetch audio blob for a specific sentence index in the background
+   */
+  private prefetchSentenceAudio(index: number) {
+    if (index < 0 || index >= this.sentences.length) return;
+    if (this.audioBlobCache.has(index) || this.fetchingSentences.has(index)) return;
+
+    this.fetchingSentences.add(index);
+    const sentence = this.sentences[index];
+    const voice = this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural';
+    const url = `${API_BASE}/api/tts?voice=${encodeURIComponent(voice)}&rate=${this.settings.rate}&pitch=${this.settings.pitch}&text=${encodeURIComponent(sentence)}`;
+
+    fetch(url)
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.blob();
+      })
+      .then(blob => {
+        const objectUrl = URL.createObjectURL(blob);
+        this.audioBlobCache.set(index, objectUrl);
+      })
+      .catch(() => {
+        // Silently ignore prefetch errors
+      })
+      .finally(() => {
+        this.fetchingSentences.delete(index);
+      });
+  }
+
   private speakCurrentSentence() {
     if (this.state !== 'playing') return;
 
+    // Check if we reached the end of the chapter
     if (this.currentSentenceIndex >= this.sentences.length) {
       this.stop();
+      this.clearAudioBlobCache();
       this.listeners.forEach(l => l.onChapterComplete?.());
       return;
     }
 
-    const sentence = this.sentences[this.currentSentenceIndex];
-    this.notifySentence(this.currentSentenceIndex, sentence);
+    const currentToken = ++this.playbackToken;
+    const sentenceIdx = this.currentSentenceIndex;
+    const sentence = this.sentences[sentenceIdx];
+    this.notifySentence(sentenceIdx, sentence);
 
     // 1. Online AI Neural / Google TTS playback
     if (this.isOnlineVoice()) {
-      if (this.synth) this.synth.cancel();
+      if (this.synth) {
+        if (this.currentUtterance) {
+          this.currentUtterance.onend = null;
+          this.currentUtterance.onerror = null;
+        }
+        this.synth.cancel();
+      }
 
       if (!this.audioPlayer) {
         this.setupAudioPlayer();
       }
 
-      const voice = this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural';
-      const audioUrl = `${API_BASE}/api/tts?voice=${encodeURIComponent(voice)}&rate=${this.settings.rate}&pitch=${this.settings.pitch}&text=${encodeURIComponent(sentence)}`;
+      const player = this.audioPlayer!;
+      player.onended = null;
+      player.onerror = null;
 
-      if (this.audioPlayer) {
-        this.audioPlayer.src = audioUrl;
-        this.audioPlayer.play().catch(err => {
-          console.warn('Audio play error, retrying next:', err);
-          if (this.state === 'playing') {
-            this.currentSentenceIndex++;
-            this.speakCurrentSentence();
-          }
+      // Handle when audio finishes playing: advance to next sentence
+      player.onended = () => {
+        if (currentToken !== this.playbackToken || this.state !== 'playing') return;
+        this.consecutiveErrors = 0;
+        this.currentSentenceIndex++;
+        this.speakCurrentSentence();
+      };
+
+      // Handle playback error: retry or skip cleanly without infinite recursion
+      player.onerror = (e) => {
+        if (currentToken !== this.playbackToken || this.state !== 'playing') return;
+        console.warn('Audio player error on sentence:', sentenceIdx, e);
+        this.consecutiveErrors++;
+        if (this.consecutiveErrors < 3) {
+          setTimeout(() => {
+            if (currentToken === this.playbackToken && this.state === 'playing') {
+              this.currentSentenceIndex++;
+              this.speakCurrentSentence();
+            }
+          }, 250);
+        } else {
+          // If 3 consecutive errors occur, fallback to local SpeechSynthesis
+          console.warn('Falling back to local SpeechSynthesis due to repeated errors');
+          this.playBrowserTTS(sentence, currentToken);
+        }
+      };
+
+      // Check if audio blob is already prefetched in memory
+      if (this.audioBlobCache.has(sentenceIdx)) {
+        player.src = this.audioBlobCache.get(sentenceIdx)!;
+        player.play().catch(err => {
+          if (currentToken !== this.playbackToken || this.state !== 'playing') return;
+          console.warn('Play error with cached audio:', err);
+          player.onerror?.(new Event('error'));
+        });
+      } else {
+        // Fetch audio directly
+        const voice = this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural';
+        const audioUrl = `${API_BASE}/api/tts?voice=${encodeURIComponent(voice)}&rate=${this.settings.rate}&pitch=${this.settings.pitch}&text=${encodeURIComponent(sentence)}`;
+        player.src = audioUrl;
+        player.play().catch(err => {
+          if (currentToken !== this.playbackToken || this.state !== 'playing') return;
+          console.warn('Play error with direct url:', err);
+          player.onerror?.(new Event('error'));
         });
       }
 
-      // Prefetch next sentence audio for seamless instant playback
-      if (this.currentSentenceIndex + 1 < this.sentences.length) {
-        const nextSentence = this.sentences[this.currentSentenceIndex + 1];
-        const nextUrl = `${API_BASE}/api/tts?voice=${encodeURIComponent(voice)}&rate=${this.settings.rate}&pitch=${this.settings.pitch}&text=${encodeURIComponent(nextSentence)}`;
-        if (!this.prefetchAudio) {
-          this.prefetchAudio = new Audio();
+      // Prefetch upcoming sentences in background
+      this.prefetchSentenceAudio(sentenceIdx + 1);
+      this.prefetchSentenceAudio(sentenceIdx + 2);
+
+      // Clean up older blobs to keep memory lean
+      if (sentenceIdx > 2) {
+        const oldIdx = sentenceIdx - 2;
+        if (this.audioBlobCache.has(oldIdx)) {
+          try {
+            URL.revokeObjectURL(this.audioBlobCache.get(oldIdx)!);
+          } catch {}
+          this.audioBlobCache.delete(oldIdx);
         }
-        this.prefetchAudio.src = nextUrl;
-        this.prefetchAudio.load();
       }
 
       return;
     }
 
     // 2. Local Browser Offline Speech Synthesis
+    this.playBrowserTTS(sentence, currentToken);
+  }
+
+  private playBrowserTTS(sentence: string, currentToken: number) {
     if (!this.synth) return;
 
+    if (this.currentUtterance) {
+      this.currentUtterance.onend = null;
+      this.currentUtterance.onerror = null;
+    }
+    this.synth.cancel();
+
     const utterance = new SpeechSynthesisUtterance(sentence);
+    this.currentUtterance = utterance;
     utterance.rate = this.settings.rate;
     utterance.pitch = this.settings.pitch;
 
@@ -385,29 +506,32 @@ class TTSEngine {
     }
 
     utterance.onend = () => {
-      if (this.state === 'playing') {
-        this.currentSentenceIndex++;
-        this.speakCurrentSentence();
-      }
+      if (currentToken !== this.playbackToken || this.state !== 'playing') return;
+      this.consecutiveErrors = 0;
+      this.currentSentenceIndex++;
+      this.speakCurrentSentence();
     };
 
     utterance.onerror = (e) => {
-      console.warn('TTS utterance error:', e);
-      if (this.state === 'playing') {
-        this.currentSentenceIndex++;
-        this.speakCurrentSentence();
-      }
+      if (currentToken !== this.playbackToken || this.state !== 'playing') return;
+      // If error is canceled/interrupted, ignore it
+      if (e.error === 'canceled' || e.error === 'interrupted') return;
+      console.warn('SpeechSynthesis error:', e);
+      this.currentSentenceIndex++;
+      this.speakCurrentSentence();
     };
 
-    this.synth.cancel();
     this.synth.speak(utterance);
   }
 
   /**
-   * Sentence segmentation regex
+   * Sentence segmentation regex:
+   * Normalizes newlines and extracts clean sentences containing readable text
    */
   private splitIntoSentences(text: string): string[] {
-    const rawParagraphs = text.split(/\n+/);
+    if (!text) return [];
+    const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const rawParagraphs = normalized.split(/\n+/);
     const result: string[] = [];
 
     for (const para of rawParagraphs) {
@@ -418,14 +542,19 @@ class TTSEngine {
       if (matches) {
         for (const m of matches) {
           const s = m.trim();
-          if (s) result.push(s);
+          // Filter out sentences that have no letters or numbers (e.g. "......", "***", "---")
+          if (s && /[a-zA-Z0-9\u00C0-\u1EF9]/.test(s)) {
+            result.push(s);
+          }
         }
       } else {
-        result.push(trimmed);
+        if (/[a-zA-Z0-9\u00C0-\u1EF9]/.test(trimmed)) {
+          result.push(trimmed);
+        }
       }
     }
 
-    return result.length > 0 ? result : [text];
+    return result.length > 0 ? result : [text.trim()].filter(Boolean);
   }
 
   /**
