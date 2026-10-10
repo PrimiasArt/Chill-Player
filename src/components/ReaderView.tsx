@@ -186,20 +186,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   // Split chapter content into clean readable sentences matching ttsEngine
   const sentences = React.useMemo(() => {
     if (!currentChapter || !currentChapter.content) return [];
-    const normalized = currentChapter.content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    return normalized
-      .split(/\n+/)
-      .map(p => p.trim())
-      .filter(Boolean)
-      .flatMap(p => {
-        const matches = p.match(/[^.!?…\n]+[.!?…]+(?:\s+|$)|[^.!?…\n]+$/g);
-        if (matches) {
-          return matches
-            .map(s => s.trim())
-            .filter(s => s && /[a-zA-Z0-9\u00C0-\u1EF9]/.test(s));
-        }
-        return [p].filter(s => /[a-zA-Z0-9\u00C0-\u1EF9]/.test(s));
-      });
+    return ttsEngine.splitIntoSentences(currentChapter.content);
   }, [currentChapter]);
 
   // Scroll to active sentence ONLY if it is out of the visible screen viewport
