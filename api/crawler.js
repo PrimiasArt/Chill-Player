@@ -247,25 +247,27 @@ export default async function handler(req, res) {
     const action = urlObj.searchParams.get('action') || (req.body && req.body.action);
 
     if (action === 'probe') {
-      const tests = [
-        { name: 'hh3d-search-default', url: 'https://truyenhh3d.com/tim-kiem?q=dau+pha', headers: BROWSER_HEADERS },
-        { name: 'hh3d-search-referer', url: 'https://truyenhh3d.com/tim-kiem?q=dau+pha', headers: { ...BROWSER_HEADERS, 'Referer': 'https://truyenhh3d.com/' } },
-        { name: 'hh3d-hot', url: 'https://truyenhh3d.com/the-loai/truyen-hot', headers: BROWSER_HEADERS },
-        { name: 'hh3d-detail', url: 'https://truyenhh3d.com/truyen/dau-pha-thuong-khung', headers: BROWSER_HEADERS },
-        { name: 'hh3d-ch1', url: 'https://truyenhh3d.com/truyen/dau-pha-thuong-khung/chuong-1', headers: BROWSER_HEADERS },
-        { name: 'stv-search', url: 'https://sangtacviet.vip/?find=&findinname=dau+pha', headers: BROWSER_HEADERS }
+      const candidates = [
+        'https://wikisach.net/',
+        'https://dtruyen.com/',
+        'https://truyenaudiocv.net/',
+        'https://truyentranh.net/',
+        'https://bachngocsach.net/',
+        'https://nettruyen.com/',
+        'https://tve-4u.org/',
+        'https://vlogtruyen.net/',
+        'https://doc-truyen.net/'
       ];
-      const results = {};
-      for (const t of tests) {
+      const resMap = {};
+      for (const c of candidates) {
         try {
-          const resp = await fetch(t.url, { headers: t.headers, signal: AbortSignal.timeout(5000) });
-          const text = await resp.text();
-          results[t.name] = { status: resp.status, ok: resp.ok, len: text.length, preview: text.slice(0, 100) };
+          const r = await fetch(c, { headers: BROWSER_HEADERS, signal: AbortSignal.timeout(4000) });
+          resMap[c] = { status: r.status, ok: r.ok };
         } catch(e) {
-          results[t.name] = { error: e.message };
+          resMap[c] = { error: e.message };
         }
       }
-      res.status(200).json({ success: true, results });
+      res.status(200).json({ success: true, resMap });
       return;
     }
 
