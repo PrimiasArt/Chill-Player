@@ -202,20 +202,69 @@ async function handleStoryDetail(storyUrl) {
                   html.match(/itemprop="description"[^>]*>([\s\S]*?)<\/div>/i);
     const description = descM ? decodeHtmlEntities(descM[1].replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').trim()) : '';
 
-    // Total chapters count
-    const totalM = html.match(/(\d+)\s*chương/i);
-    const totalChapters = totalM ? parseInt(totalM[1]) : 50;
-
     // Base slug for chapters: e.g. https://wetruyen.com/dau-pha-thuong-khung.12/ => https://wetruyen.com/dau-pha-thuong-khung
     const baseSlug = storyUrl.replace(/\.\d+\/?$/, '').replace(/\/$/, '');
 
-    const chapters = [];
-    for (let i = 1; i <= Math.min(totalChapters, 1500); i++) {
-      chapters.push({
-        number: i,
-        title: `Chương ${i}`,
-        url: `${baseSlug}/chuong-${i}.html`
+    // Extract chapters from page 1
+    const knownChapters = new Map();
+    const p1Matches = [...html.matchAll(/<a[^>]+href="([^"]*chuong-(\d+)\.html)"[^>]*>([\s\S]*?)<\/a>/gi)];
+    for (const m of p1Matches) {
+      const num = parseInt(m[2]);
+      const rawTitle = decodeHtmlEntities(m[3].replace(/<[^>]+>/g, '').trim());
+      knownChapters.set(num, {
+        number: num,
+        title: rawTitle ? (rawTitle.toLowerCase().startsWith('chương') ? rawTitle : `Chương ${num}: ${rawTitle}`) : `Chương ${num}`,
+        url: m[1]
       });
+    }
+
+    // Determine total chapters from pagination
+    const pageMatches = [...html.matchAll(/trang-(\d+)/gi)].map(m => parseInt(m[1]));
+    const lastPage = pageMatches.length > 0 ? Math.max(...pageMatches) : 1;
+
+    let totalChapters = 50;
+    if (lastPage > 1) {
+      try {
+        const lastPageUrl = `${storyUrl.replace(/\/$/, '')}/trang-${lastPage}/`;
+        const lastRes = await fetch(lastPageUrl, { headers: BROWSER_HEADERS, signal: AbortSignal.timeout(4000) });
+        if (lastRes.ok) {
+          const lastHtml = await lastRes.text();
+          const lastChMatches = [...lastHtml.matchAll(/<a[^>]+href="([^"]*chuong-(\d+)\.html)"[^>]*>([\s\S]*?)<\/a>/gi)];
+          for (const m of lastChMatches) {
+            const num = parseInt(m[2]);
+            const rawTitle = decodeHtmlEntities(m[3].replace(/<[^>]+>/g, '').trim());
+            knownChapters.set(num, {
+              number: num,
+              title: rawTitle ? (rawTitle.toLowerCase().startsWith('chương') ? rawTitle : `Chương ${num}: ${rawTitle}`) : `Chương ${num}`,
+              url: m[1]
+            });
+          }
+          const chNums = [...lastHtml.matchAll(/chuong-(\d+)/gi)].map(m => parseInt(m[1]));
+          if (chNums.length > 0) {
+            totalChapters = Math.max(...chNums);
+          } else {
+            totalChapters = lastPage * 50;
+          }
+        }
+      } catch (e) {
+        totalChapters = lastPage * 50;
+      }
+    } else {
+      const chNums = [...html.matchAll(/chuong-(\d+)/gi)].map(m => parseInt(m[1]));
+      if (chNums.length > 0) totalChapters = Math.max(...chNums);
+    }
+
+    const chapters = [];
+    for (let i = 1; i <= Math.min(totalChapters, 2500); i++) {
+      if (knownChapters.has(i)) {
+        chapters.push(knownChapters.get(i));
+      } else {
+        chapters.push({
+          number: i,
+          title: `Chương ${i}`,
+          url: `${baseSlug}/chuong-${i}.html`
+        });
+      }
     }
 
     return {
@@ -223,7 +272,7 @@ async function handleStoryDetail(storyUrl) {
       author,
       coverUrl,
       description,
-      sourceUrl,
+      sourceUrl: storyUrl,
       totalChapters: chapters.length,
       chapters
     };
@@ -295,7 +344,7 @@ async function handleStoryDetail(storyUrl) {
     author,
     coverUrl,
     description,
-    sourceUrl,
+    sourceUrl: storyUrl,
     totalChapters: chapters.length,
     chapters
   };
