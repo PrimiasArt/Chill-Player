@@ -247,24 +247,22 @@ export default async function handler(req, res) {
     const action = urlObj.searchParams.get('action') || (req.body && req.body.action);
 
     if (action === 'probe') {
-      const sites = [
-        'https://truyenhh3d.com/',
-        'https://truyenchu.net/',
-        'https://sangtacviet.vip/',
-        'https://metruyencv.com/',
-        'https://bachngocsach.com.vn/',
-        'https://api.allorigins.win/raw?url=https%3A%2F%2Ftruyenhh3d.com%2F'
+      const tests = [
+        { name: 'hh3d-search-default', url: 'https://truyenhh3d.com/tim-kiem?q=dau+pha', headers: BROWSER_HEADERS },
+        { name: 'hh3d-search-referer', url: 'https://truyenhh3d.com/tim-kiem?q=dau+pha', headers: { ...BROWSER_HEADERS, 'Referer': 'https://truyenhh3d.com/' } },
+        { name: 'hh3d-hot', url: 'https://truyenhh3d.com/the-loai/truyen-hot', headers: BROWSER_HEADERS },
+        { name: 'hh3d-detail', url: 'https://truyenhh3d.com/truyen/dau-pha-thuong-khung', headers: BROWSER_HEADERS },
+        { name: 'hh3d-ch1', url: 'https://truyenhh3d.com/truyen/dau-pha-thuong-khung/chuong-1', headers: BROWSER_HEADERS },
+        { name: 'stv-search', url: 'https://sangtacviet.vip/?find=&findinname=dau+pha', headers: BROWSER_HEADERS }
       ];
       const results = {};
-      for (const s of sites) {
+      for (const t of tests) {
         try {
-          const resp = await fetch(s, {
-            headers: BROWSER_HEADERS,
-            signal: AbortSignal.timeout(4000)
-          });
-          results[s] = { status: resp.status, ok: resp.ok };
+          const resp = await fetch(t.url, { headers: t.headers, signal: AbortSignal.timeout(5000) });
+          const text = await resp.text();
+          results[t.name] = { status: resp.status, ok: resp.ok, len: text.length, preview: text.slice(0, 100) };
         } catch(e) {
-          results[s] = { error: e.message };
+          results[t.name] = { error: e.message };
         }
       }
       res.status(200).json({ success: true, results });
