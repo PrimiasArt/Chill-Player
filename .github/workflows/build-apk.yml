@@ -94,7 +94,7 @@ jobs:
           make_latest: true
           body: |
             ## 📱 Bản cài đặt Android APK (Chill Reader - v1.0.${{ github.run_number }})
-            - **Phiên bản:** `1.0.${{ github.run_number }}` (VersionCode: ${{ 100 + github.run_number }})
+            - **Phiên bản:** `1.0.${{ github.run_number }}` (Mới nhất)
             - **Chữ ký cố định (Persistent Keystore):** Cài đè trực tiếp mà không cần gỡ bản cũ, giữ nguyên 100% dữ liệu sách offline và cài đặt đồng bộ Supabase Cloud.
             - **Tính năng & Sửa lỗi:**
               - 🛠️ **Sửa triệt để lỗi màn hình xám khi bấm Cài đặt (Settings):** Khởi tạo dữ liệu an toàn.
