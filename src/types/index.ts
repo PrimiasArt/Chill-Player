@@ -43,7 +43,7 @@ export interface ReaderSettings {
   autoScrollSpeed: number; // 1 - 10
 }
 
-export type TTSEngineType = 'ai' | 'google' | 'browser';
+export type TTSEngineType = 'ai' | 'google' | 'browser' | 'native';
 
 export interface TTSSettings {
   voiceURI: string;

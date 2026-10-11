@@ -197,7 +197,13 @@ class TTSEngine {
   public isOnlineVoice(voiceURI?: string): boolean {
     const v = voiceURI !== undefined ? voiceURI : this.settings.voiceURI;
     if (!v) return true;
+    if (v.startsWith('native:')) return false;
     return v.startsWith('edge:') || v.startsWith('google:') || v.startsWith('vi-VN-');
+  }
+
+  public isNativeVoice(voiceURI?: string): boolean {
+    const v = voiceURI !== undefined ? voiceURI : this.settings.voiceURI;
+    return !!v && v.startsWith('native:');
   }
 
   public getVoices(): SpeechSynthesisVoice[] {
@@ -217,6 +223,23 @@ class TTSEngine {
 
   public getAllAvailableVoices(): VoiceOption[] {
     const list: VoiceOption[] = [...CURATED_VOICES];
+
+    const isAndroid = typeof window !== 'undefined' && (
+      Boolean((window as any).AndroidMedia) || 
+      /android/i.test(navigator.userAgent)
+    );
+
+    if (isAndroid) {
+      list.push({
+        id: 'native:android',
+        name: 'Giọng máy Android (100% Offline)',
+        category: 'native',
+        gender: 'neutral',
+        badge: '100% Offline · Không mạng',
+        description: 'Giọng đọc gốc của điện thoại Android (Google/Samsung TTS), đọc mượt mà không cần mạng Internet',
+        isOnline: false
+      });
+    }
 
     const browserVoices = this.getVietnameseVoices();
     browserVoices.forEach(bv => {
@@ -272,6 +295,11 @@ class TTSEngine {
       this.testAudio.playbackRate = effRate;
       this.testAudio.defaultPlaybackRate = effRate;
       await this.testAudio.play();
+    } else if (voiceURI.startsWith('native:')) {
+      const androidMedia = (window as any).AndroidMedia;
+      if (androidMedia && typeof androidMedia.speakNative === 'function') {
+        androidMedia.speakNative(sampleText, this.settings.rate || 1.0, this.settings.pitch || 1.0, 'test_sample');
+      }
     } else {
       if (!this.synth) return;
       const utterance = new SpeechSynthesisUtterance(sampleText);
@@ -332,6 +360,12 @@ class TTSEngine {
             this.currentUtterance.onerror = null;
           }
           this.synth.cancel();
+        }
+        if (this.isNativeVoice()) {
+          const androidMedia = (window as any).AndroidMedia;
+          if (androidMedia && typeof androidMedia.stopNative === 'function') {
+            androidMedia.stopNative();
+          }
         }
 
         // Restart speaking the current sentence with the new voice instantly
@@ -412,6 +446,8 @@ class TTSEngine {
     if (this.state === 'paused') {
       if (this.isOnlineVoice() && this.activePlayer && this.activePlayer.src) {
         this.activePlayer.play().catch(() => {});
+      } else if (this.isNativeVoice()) {
+        this.speakCurrentSentence();
       } else if (this.synth) {
         this.synth.resume();
       }
@@ -434,6 +470,11 @@ class TTSEngine {
     if (this.isOnlineVoice()) {
       if (this.audioPlayers[0]) this.audioPlayers[0].pause();
       if (this.audioPlayers[1]) this.audioPlayers[1].pause();
+    } else if (this.isNativeVoice()) {
+      const androidMedia = (window as any).AndroidMedia;
+      if (androidMedia && typeof androidMedia.stopNative === 'function') {
+        androidMedia.stopNative();
+      }
     } else if (this.synth) {
       this.synth.pause();
     }
@@ -460,6 +501,12 @@ class TTSEngine {
       this.audioPlayers[1].onerror = null;
       this.audioPlayers[1].pause();
       this.audioPlayers[1].src = '';
+    }
+    if (this.isNativeVoice()) {
+      const androidMedia = (window as any).AndroidMedia;
+      if (androidMedia && typeof androidMedia.stopNative === 'function') {
+        androidMedia.stopNative();
+      }
     }
     if (this.synth) {
       if (this.currentUtterance) {
@@ -715,7 +762,14 @@ class TTSEngine {
       player.onerror = (e) => {
         if (currentToken !== this.playbackToken || this.state !== 'playing') return;
         console.warn('Audio player error on sentence:', sentenceIdx, e);
-        
+
+        // If offline and native Android TTS is ready, automatically fallback to Native TTS
+        if (!navigator.onLine && (window as any).AndroidMedia?.isNativeTtsReady?.()) {
+          console.log('Device is offline: seamlessly reading via Native Android TTS');
+          this.playNativeAndroidTTS(sentence, currentToken);
+          return;
+        }
+
         // Retry the exact same sentence once after 500ms
         if (this.consecutiveErrors === 0) {
           this.consecutiveErrors++;
@@ -778,8 +832,57 @@ class TTSEngine {
       return;
     }
 
-    // 2. Local Browser Offline Speech Synthesis
+    // 2. Native Android Offline Speech Synthesis (direct android.speech.tts.TextToSpeech)
+    if (this.isNativeVoice()) {
+      this.playNativeAndroidTTS(sentence, currentToken);
+      return;
+    }
+
+    // 3. Local Browser Offline Speech Synthesis
     this.playBrowserTTS(sentence, currentToken);
+  }
+
+  private playNativeAndroidTTS(sentence: string, currentToken: number) {
+    const androidMedia = (window as any).AndroidMedia;
+    if (androidMedia && typeof androidMedia.speakNative === 'function') {
+      const processedText = pronunciationService.applyRules(sentence);
+      const utteranceId = `utt_${currentToken}_${this.currentSentenceIndex}`;
+      androidMedia.speakNative(
+        processedText,
+        this.settings.rate || 1.0,
+        this.settings.pitch || 1.0,
+        utteranceId
+      );
+    } else {
+      // Fallback to browser TTS if native bridge isn't connected
+      this.playBrowserTTS(sentence, currentToken);
+    }
+  }
+
+  public onNativeUtteranceStart(_utteranceId: string) {
+    // Hook for native speech start
+  }
+
+  public onNativeUtteranceDone(utteranceId: string) {
+    if (this.state !== 'playing' || !this.isNativeVoice()) return;
+    const parts = utteranceId.split('_');
+    const token = parseInt(parts[1], 10);
+    if (!isNaN(token) && token !== this.playbackToken) return;
+
+    this.consecutiveErrors = 0;
+    this.currentSentenceIndex++;
+    this.speakCurrentSentence();
+  }
+
+  public onNativeUtteranceError(utteranceId: string) {
+    if (this.state !== 'playing' || !this.isNativeVoice()) return;
+    const parts = utteranceId.split('_');
+    const token = parseInt(parts[1], 10);
+    if (!isNaN(token) && token !== this.playbackToken) return;
+
+    console.warn('Native TTS error on utterance:', utteranceId);
+    this.currentSentenceIndex++;
+    this.speakCurrentSentence();
   }
 
   private playBrowserTTS(sentence: string, currentToken: number) {

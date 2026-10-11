@@ -11,6 +11,8 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.Build;
 import android.os.Bundle;
+import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
@@ -24,6 +26,7 @@ import com.getcapacitor.BridgeActivity;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -40,6 +43,9 @@ public class MainActivity extends BridgeActivity {
     private MediaSessionCompat mediaSession;
     private BroadcastReceiver mediaActionReceiver;
     private boolean isReceiverRegistered = false;
+
+    private TextToSpeech nativeTts;
+    private boolean isNativeTtsReady = false;
 
     private final ExecutorService imageExecutor = Executors.newSingleThreadExecutor();
     private volatile String lastCoverUrl = null;
@@ -58,6 +64,7 @@ public class MainActivity extends BridgeActivity {
                 requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 101);
             }
         }
+        initNativeTts();
         setupWebViewBridge();
     }
 
@@ -191,7 +198,77 @@ public class MainActivity extends BridgeActivity {
         isReceiverRegistered = true;
     }
 
+    private void initNativeTts() {
+        try {
+            nativeTts = new TextToSpeech(getApplicationContext(), status -> {
+                if (status == TextToSpeech.SUCCESS) {
+                    try {
+                        int result = nativeTts.setLanguage(new Locale("vi", "VN"));
+                        if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                            nativeTts.setLanguage(new Locale("vi"));
+                        }
+                    } catch (Exception ignored) {}
+                    isNativeTtsReady = true;
+
+                    nativeTts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                        @Override
+                        public void onStart(String utteranceId) {
+                            sendWebViewCommand("window.ttsEngine && window.ttsEngine.onNativeUtteranceStart && window.ttsEngine.onNativeUtteranceStart('" + utteranceId + "')");
+                        }
+
+                        @Override
+                        public void onDone(String utteranceId) {
+                            sendWebViewCommand("window.ttsEngine && window.ttsEngine.onNativeUtteranceDone && window.ttsEngine.onNativeUtteranceDone('" + utteranceId + "')");
+                        }
+
+                        @Override
+                        public void onError(String utteranceId) {
+                            sendWebViewCommand("window.ttsEngine && window.ttsEngine.onNativeUtteranceError && window.ttsEngine.onNativeUtteranceError('" + utteranceId + "')");
+                        }
+                    });
+                } else {
+                    isNativeTtsReady = false;
+                }
+            });
+        } catch (Exception e) {
+            e.printStackTrace();
+            isNativeTtsReady = false;
+        }
+    }
+
     private class AndroidMediaBridge {
+        @JavascriptInterface
+        public boolean isNativeTtsReady() {
+            return isNativeTtsReady && nativeTts != null;
+        }
+
+        @JavascriptInterface
+        public void speakNative(String text, float rate, float pitch, String utteranceId) {
+            if (nativeTts == null || !isNativeTtsReady) return;
+            runOnUiThread(() -> {
+                try {
+                    nativeTts.setSpeechRate(rate);
+                    nativeTts.setPitch(pitch);
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                        nativeTts.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void stopNative() {
+            if (nativeTts != null) {
+                runOnUiThread(() -> {
+                    try {
+                        nativeTts.stop();
+                    } catch (Exception ignored) {}
+                });
+            }
+        }
+
         @JavascriptInterface
         public void updateMedia(String chapterTitle, String bookTitle, String author, boolean isPlaying) {
             updateMedia(chapterTitle, bookTitle, author, isPlaying, "", 0, 0);
@@ -457,6 +534,14 @@ public class MainActivity extends BridgeActivity {
                 mediaSession.release();
             } catch (Exception ignored) {}
             mediaSession = null;
+        }
+        if (nativeTts != null) {
+            try {
+                nativeTts.stop();
+                nativeTts.shutdown();
+            } catch (Exception ignored) {}
+            nativeTts = null;
+            isNativeTtsReady = false;
         }
         imageExecutor.shutdown();
     }

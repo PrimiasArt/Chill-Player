@@ -757,6 +757,8 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
                             ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
                             : v.category === 'google'
                             ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                            : v.category === 'native'
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-semibold'
                             : 'bg-zinc-700 text-zinc-300'
                         }`}>
                           {v.badge}
