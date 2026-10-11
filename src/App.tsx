@@ -123,7 +123,9 @@ export const App: React.FC = () => {
               title: story.title,
               author: story.author,
               chapterTitle: chapter.title,
-              coverUrl: story.coverUrl
+              coverUrl: story.coverUrl,
+              storyId: story.id,
+              chapterNumber: chapter.chapterNumber
             },
             story.currentSentenceIndex || 0
           );
@@ -170,7 +172,9 @@ export const App: React.FC = () => {
           title: activeStory.title,
           author: activeStory.author,
           chapterTitle: chapter.title,
-          coverUrl: activeStory.coverUrl
+          coverUrl: activeStory.coverUrl,
+          storyId: activeStory.id,
+          chapterNumber: chapter.chapterNumber
         },
         0
       );
@@ -382,6 +386,9 @@ export const App: React.FC = () => {
         onClosePlayer={() => ttsEngine.stop()}
         isOpenFullModal={isFullTTSModalOpen}
         onSetOpenFullModal={setIsFullTTSModalOpen}
+        isInsideReader={!!activeStory}
+        storyId={activeStory?.id}
+        chapterNumber={currentChapterNumber}
       />
 
       {/* File Import Modal (.txt, .epub, .pdf) */}

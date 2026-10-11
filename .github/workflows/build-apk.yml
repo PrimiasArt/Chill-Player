@@ -65,15 +65,19 @@ jobs:
           tag_name: android-apk-latest
           name: Chill Reader Android APK (Mới nhất)
           body: |
-            ## 📱 Bản cài đặt Android APK (Chill Reader)
-            - **Phiên bản:** Mới nhất (Capacitor Android)
-            - **Tính năng mới & Sửa lỗi quan trọng:**
-              - 🔊 **Audio TTS trên Android APK:** Sửa lỗi không phát được âm thanh trong app, cấp quyền âm thanh nền và mở khóa tự động phát liên tục qua từng câu.
-              - ☁️ **Đồng bộ Supabase 2 chiều toàn diện:** Xóa truyện là xóa vĩnh viễn trên Cloud (không bị kéo lại truyện đã xóa), hỗ trợ đồng bộ toàn bộ nội dung chữ của các chương (`user_chapters`).
-              - 📥 **Nút tải chương 1-click:** Khi mở truyện đồng bộ trên điện thoại chưa có chữ, người dùng có thể tải ngay từ Supabase Cloud hoặc tải trực tiếp từ nguồn web online.
-              - 🎧 Đọc và nghe Audio TTS đa giọng (Nam Minh AI, Hoài My AI, Google).
-              - ⚡ Tìm kiếm và nút "Đi nhanh" tới số chương trong Mục lục.
-            
+            ## 📱 Bản cài đặt Android APK (Chill Reader - Nâng cấp toàn diện)
+            - **Chữ ký cố định (Persistent Keystore):** Giải quyết triệt để lỗi xung đột cài đè APK! Cập nhật trực tiếp mà không cần gỡ bản cũ, giữ nguyên 100% dữ liệu và cài đặt Supabase.
+            - **Tính năng & Hiệu năng nâng cấp:**
+              - 📱 **Giao diện Player chống tràn màn hình:** Tối ưu kích thước linh hoạt, cuộn mượt mà trên mọi kích thước màn hình Android.
+              - ⚡ **Virtual Scrolling Mục lục:** Hiển thị mượt mà 3.000 - 10.000 chương đạt chuẩn 60 FPS, không còn giật lag DOM.
+              - 📖 **Chế độ Lật trang (Paged Mode - Kindle) & Cuộn liên tục:** Tự động lật trang theo giọng đọc Audio TTS.
+              - 🔄 **Tự động kiểm tra & cập nhật chương mới:** Nút cập nhật tức thì từ nguồn web online.
+              - 🌧️ **Âm thanh nền thư giãn (Ambient Audio):** Phối âm tiếng mưa rơi, củi lửa tí tách, gió rừng trúc, suối nước thiên nhiên cùng giọng đọc.
+              - 📳 **Lắc máy gia hạn hẹn giờ (Shake-to-Extend):** Lắc nhẹ điện thoại khi sắp hết giờ để nghe thêm 15 phút.
+              - 🗣️ **Từ điển phát âm tuỳ chỉnh (Pronunciation Dictionary):** Sửa từ viết tắt, từ ngọng (ko ➔ không, main ➔ nhân vật chính,...).
+              - 💾 **Tải Audio ngoại tuyến 1-click & Xuất file:** Tải trọn bộ audio cả chương để nghe offline, hỗ trợ xuất truyện ra định dạng EPUB & TXT.
+              - 📜 **Sổ tay nhân vật & Cảnh giới tu tiên:** Ghi nhớ nhân vật, quan hệ, cấp độ tu luyện và pháp bảo.
+
             👉 Tải file **`ChillReader-v1.0.apk`** bên dưới và cài đặt trực tiếp vào điện thoại Android.
           files: ChillReader-v1.0.apk
           draft: false

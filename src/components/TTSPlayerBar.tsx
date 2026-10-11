@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Play, 
   Pause, 
@@ -8,9 +8,14 @@ import {
   Volume2, 
   Maximize2, 
   Minimize2, 
-  X
+  X,
+  Download,
+  Loader2,
+  Smartphone,
+  CloudRain
 } from 'lucide-react';
 import { ttsEngine, type TTSState } from '../services/tts/ttsEngine';
+import { ambientAudioService, AMBIENT_SOUND_OPTIONS, type AmbientSoundType } from '../services/tts/ambientAudio';
 import type { TTSSettings } from '../types';
 
 interface TTSPlayerBarProps {
@@ -28,6 +33,9 @@ interface TTSPlayerBarProps {
   onClosePlayer: () => void;
   isOpenFullModal: boolean;
   onSetOpenFullModal: (open: boolean) => void;
+  isInsideReader?: boolean;
+  storyId?: string;
+  chapterNumber?: number;
 }
 
 export const TTSPlayerBar: React.FC<TTSPlayerBarProps> = ({
@@ -44,8 +52,16 @@ export const TTSPlayerBar: React.FC<TTSPlayerBarProps> = ({
   onUpdateSettings,
   onClosePlayer,
   isOpenFullModal,
-  onSetOpenFullModal
+  onSetOpenFullModal,
+  isInsideReader,
+  storyId,
+  chapterNumber
 }) => {
+  const [ambientType, setAmbientType] = useState<AmbientSoundType>(ambientAudioService.getType());
+  const [ambientVolume, setAmbientVolume] = useState<number>(ambientAudioService.getVolume());
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<{ done: number; total: number } | null>(null);
+
   if (ttsState === 'idle') return null;
 
   const formatCountdown = (secs: number | null) => {
@@ -53,6 +69,21 @@ export const TTSPlayerBar: React.FC<TTSPlayerBarProps> = ({
     const mins = Math.floor(secs / 60);
     const remainder = secs % 60;
     return `${mins}:${remainder < 10 ? '0' : ''}${remainder}`;
+  };
+
+  const handleDownloadAudio = async () => {
+    if (!storyId || chapterNumber === undefined) return;
+    setIsDownloading(true);
+    try {
+      await ttsEngine.downloadChapterAudio(storyId, chapterNumber, (done, total) => {
+        setDownloadProgress({ done, total });
+      });
+    } catch (e) {
+      console.warn('Download chapter audio error:', e);
+    } finally {
+      setIsDownloading(false);
+      setDownloadProgress(null);
+    }
   };
 
   const allVoices = ttsEngine.getAllAvailableVoices();
@@ -64,22 +95,28 @@ export const TTSPlayerBar: React.FC<TTSPlayerBarProps> = ({
   return (
     <>
       {/* 1. Floating Mini Player Bar at Bottom (stacked above BottomNav on mobile) */}
-      <div className="fixed bottom-14 md:bottom-0 left-0 right-0 z-40 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800 text-zinc-100 shadow-2xl px-4 py-2.5">
-        <div className="max-w-4xl mx-auto flex items-center justify-between gap-3">
+      <div 
+        className={`fixed left-0 right-0 z-40 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800 text-zinc-100 shadow-2xl px-3 sm:px-4 py-2 transition-all ${
+          isInsideReader 
+            ? 'bottom-0 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))]' 
+            : 'bottom-16 pb-2'
+        }`}
+      >
+        <div className="max-w-4xl mx-auto flex items-center justify-between gap-2 sm:gap-3">
           {/* Story & Chapter Info */}
           <div 
             onClick={() => onSetOpenFullModal(true)}
-            className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer hover:opacity-90"
+            className="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer hover:opacity-90"
           >
-            <div className="w-10 h-10 rounded-lg overflow-hidden bg-zinc-800 border border-zinc-700 shrink-0 flex items-center justify-center">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg overflow-hidden bg-zinc-800 border border-zinc-700 shrink-0 flex items-center justify-center">
               {coverUrl ? (
                 <img src={coverUrl} alt={bookTitle} className="w-full h-full object-cover" />
               ) : (
-                <Volume2 className="w-5 h-5 text-amber-400" />
+                <Volume2 className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400" />
               )}
             </div>
 
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <h4 className="text-xs font-semibold text-zinc-100 truncate">
                 {chapterTitle}
               </h4>
@@ -90,109 +127,97 @@ export const TTSPlayerBar: React.FC<TTSPlayerBarProps> = ({
           </div>
 
           {/* Quick Playback Controls */}
-          <div className="flex items-center gap-1.5 sm:gap-2">
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
             {/* Rewind 1 sentence */}
             <button
               onClick={() => ttsEngine.previousSentence()}
-              className="p-2 rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
+              className="p-1.5 sm:p-2 rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
               title="Tua lùi 1 câu"
             >
-              <RotateCcw className="w-4 h-4" />
+              <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
 
-            {/* Play/Pause Button */}
+            {/* Play/Pause */}
             <button
               onClick={() => ttsEngine.togglePlayPause()}
-              className="w-10 h-10 rounded-full bg-amber-500 hover:bg-amber-400 text-zinc-950 flex items-center justify-center shadow-lg shadow-amber-500/20 transition-all cursor-pointer"
+              className="p-2 sm:p-2.5 rounded-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold transition-all shadow-md shadow-amber-500/20 active:scale-95 cursor-pointer"
+              title={ttsState === 'playing' ? 'Tạm dừng' : 'Đọc tiếp'}
             >
               {ttsState === 'playing' ? (
-                <Pause className="w-5 h-5 fill-current" />
+                <Pause className="w-4 h-4 sm:w-4.5 sm:h-4.5 fill-current" />
               ) : (
-                <Play className="w-5 h-5 fill-current translate-x-0.5" />
+                <Play className="w-4 h-4 sm:w-4.5 sm:h-4.5 fill-current translate-x-0.5" />
               )}
             </button>
 
             {/* Forward 1 sentence */}
             <button
               onClick={() => ttsEngine.nextSentence()}
-              className="p-2 rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
-              title="Tua tới 1 câu"
+              className="p-1.5 sm:p-2 rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
+              title="Tua tiến 1 câu"
             >
-              <RotateCw className="w-4 h-4" />
+              <RotateCw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
-          </div>
 
-          {/* Sleep Timer & Expand */}
-          <div className="flex items-center gap-2">
-            {countdownSeconds !== null && (
-              <span className="text-[11px] font-semibold text-amber-400 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
-                <Timer className="w-3 h-3" />
-                {formatCountdown(countdownSeconds)}
-              </span>
-            )}
-
+            {/* Expand Full Player Modal */}
             <button
               onClick={() => onSetOpenFullModal(true)}
-              className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
-              title="Mở trình phát đầy đủ"
+              className="p-1.5 sm:p-2 rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer ml-1"
+              title="Mở rộng khung nghe"
             >
-              <Maximize2 className="w-4 h-4" />
+              <Maximize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
 
+            {/* Close Player */}
             <button
               onClick={onClosePlayer}
-              className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
-              title="Tắt trình nghe audio"
+              className="p-1.5 sm:p-2 rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
+              title="Tắt trình nghe"
             >
-              <X className="w-4 h-4" />
+              <X className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
           </div>
-        </div>
-
-        {/* Mini progress line */}
-        <div className="w-full h-0.5 bg-zinc-800 mt-2 rounded-full overflow-hidden">
-          <div 
-            className="h-full bg-amber-500 transition-all duration-300"
-            style={{ width: `${progressPercent}%` }}
-          />
         </div>
       </div>
 
-      {/* 2. Full Audio Player Modal */}
+      {/* 2. Fullscreen Responsive Audio Player Modal (Bottom Sheet on Mobile) */}
       {isOpenFullModal && (
         <div 
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex flex-col justify-end sm:justify-center items-center p-0 sm:p-4 animate-in fade-in duration-200"
           onClick={() => onSetOpenFullModal(false)}
         >
           <div 
-            className="bg-zinc-900 border border-zinc-800 text-zinc-100 rounded-3xl w-full max-w-md p-6 shadow-2xl flex flex-col items-center space-y-5 animate-in fade-in zoom-in-95 duration-200"
+            className="w-full max-w-md bg-zinc-900 border-t sm:border border-zinc-800 rounded-t-3xl sm:rounded-3xl shadow-2xl p-5 sm:p-6 flex flex-col items-center gap-4 text-zinc-100 max-h-[92dvh] overflow-y-auto overscroll-contain relative custom-scrollbar"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Top Bar in Modal */}
-            <div className="w-full flex items-center justify-between pb-2 border-b border-zinc-800">
-              <span className="text-xs font-semibold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
-                <Volume2 className="w-4 h-4" />
-                Trình phát Audio TTS
+            {/* Mobile Drag Handle Indicator */}
+            <div className="w-12 h-1 bg-zinc-700/80 rounded-full -mt-2 mb-1 sm:hidden shrink-0" />
+
+            {/* Modal Top Bar */}
+            <div className="w-full flex items-center justify-between">
+              <span className="text-xs font-semibold text-zinc-400 flex items-center gap-1.5 uppercase tracking-wider">
+                <Volume2 className="w-4 h-4 text-amber-400" />
+                Trình Nghe Truyện
               </span>
-              <button
+              <button 
                 onClick={() => onSetOpenFullModal(false)}
-                className="p-1 rounded-lg text-zinc-400 hover:text-zinc-200"
+                className="p-1.5 rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors cursor-pointer"
               >
                 <Minimize2 className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Book Artwork & Titles */}
-            <div className="text-center">
-              <div className="w-32 h-44 rounded-2xl overflow-hidden bg-zinc-800 border-2 border-zinc-700/80 shadow-2xl mx-auto mb-4 flex items-center justify-center">
+            {/* Story Artwork & Title */}
+            <div className="flex flex-col items-center text-center space-y-1.5 w-full">
+              <div className="w-24 h-32 sm:w-28 sm:h-40 rounded-2xl overflow-hidden shadow-2xl border border-zinc-700/60 bg-zinc-800 shrink-0 flex items-center justify-center">
                 {coverUrl ? (
                   <img src={coverUrl} alt={bookTitle} className="w-full h-full object-cover" />
                 ) : (
-                  <Volume2 className="w-12 h-12 text-amber-400" />
+                  <Volume2 className="w-10 h-10 text-amber-400" />
                 )}
               </div>
-              <h3 className="font-bold text-base text-zinc-100 line-clamp-1">{chapterTitle}</h3>
-              <p className="text-xs text-zinc-400 mt-0.5">{bookTitle} • {author}</p>
+              <h3 className="font-bold text-sm sm:text-base text-zinc-100 line-clamp-1">{chapterTitle}</h3>
+              <p className="text-xs text-zinc-400 line-clamp-1 mt-0.5">{bookTitle}{author ? ` • ${author}` : ''}</p>
             </div>
 
             {/* Currently Read Sentence Box */}
@@ -228,12 +253,13 @@ export const TTSPlayerBar: React.FC<TTSPlayerBarProps> = ({
 
               <button
                 onClick={() => ttsEngine.togglePlayPause()}
-                className="w-16 h-16 rounded-full bg-amber-500 hover:bg-amber-400 text-zinc-950 flex items-center justify-center shadow-xl shadow-amber-500/30 transition-all cursor-pointer"
+                className="p-5 rounded-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold shadow-lg shadow-amber-500/25 active:scale-95 transition-all cursor-pointer"
+                title={ttsState === 'playing' ? 'Tạm dừng' : 'Đọc tiếp'}
               >
                 {ttsState === 'playing' ? (
-                  <Pause className="w-8 h-8 fill-current" />
+                  <Pause className="w-7 h-7 fill-current" />
                 ) : (
-                  <Play className="w-8 h-8 fill-current translate-x-0.5" />
+                  <Play className="w-7 h-7 fill-current translate-x-0.5" />
                 )}
               </button>
 
@@ -287,6 +313,56 @@ export const TTSPlayerBar: React.FC<TTSPlayerBarProps> = ({
               </div>
             </div>
 
+            {/* Ambient Background Sounds */}
+            <div className="w-full space-y-2">
+              <div className="flex justify-between items-center text-xs text-zinc-400">
+                <span className="flex items-center gap-1">
+                  <CloudRain className="w-3.5 h-3.5 text-blue-400" />
+                  Âm nền thư giãn
+                </span>
+                {ambientType !== 'off' && (
+                  <span className="text-amber-400 text-[11px] font-medium">
+                    {Math.round(ambientVolume * 100)}%
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-5 gap-1.5">
+                {AMBIENT_SOUND_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.id}
+                    onClick={() => {
+                      setAmbientType(opt.id);
+                      ambientAudioService.setSound(opt.id);
+                    }}
+                    className={`py-1.5 px-1 rounded-lg text-[10px] font-medium transition-all cursor-pointer text-center ${
+                      ambientType === opt.id
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold'
+                        : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    <span className="truncate">{opt.name}</span>
+                  </button>
+                ))}
+              </div>
+              {ambientType !== 'off' && (
+                <div className="pt-1">
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={ambientVolume}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      setAmbientVolume(v);
+                      ambientAudioService.setVolume(v);
+                    }}
+                    className="w-full h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                  />
+                </div>
+              )}
+            </div>
+
             {/* Sleep Timer Options */}
             <div className="w-full space-y-2">
               <div className="flex justify-between text-xs text-zinc-400">
@@ -294,9 +370,16 @@ export const TTSPlayerBar: React.FC<TTSPlayerBarProps> = ({
                   <Timer className="w-3.5 h-3.5 text-amber-400" />
                   Hẹn giờ tắt
                 </span>
-                <span className="text-amber-400 font-semibold">
-                  {countdownSeconds !== null ? formatCountdown(countdownSeconds) : 'Tắt'}
-                </span>
+                <div className="flex items-center gap-1.5">
+                  {countdownSeconds !== null && (
+                    <span className="text-[10px] text-zinc-400 flex items-center gap-0.5">
+                      <Smartphone className="w-3 h-3 text-amber-400" /> Lắc máy: +15p
+                    </span>
+                  )}
+                  <span className="text-amber-400 font-semibold">
+                    {countdownSeconds !== null ? formatCountdown(countdownSeconds) : 'Tắt'}
+                  </span>
+                </div>
               </div>
               <div className="grid grid-cols-4 gap-1.5">
                 {[15, 30, 45, null].map((mins, idx) => (
@@ -317,6 +400,29 @@ export const TTSPlayerBar: React.FC<TTSPlayerBarProps> = ({
                 ))}
               </div>
             </div>
+
+            {/* 1-Click Offline Audio Download */}
+            {storyId && (
+              <div className="w-full">
+                <button
+                  disabled={isDownloading || totalSentences === 0}
+                  onClick={handleDownloadAudio}
+                  className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 active:scale-98 border border-zinc-700 text-xs text-zinc-200 font-medium transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {isDownloading ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                      <span>Đang tải audio ({downloadProgress ? `${downloadProgress.done}/${downloadProgress.total}` : '...'})</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Tải Audio ngoại tuyến cả chương</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
 
             {/* Voice Selector */}
             {allVoices.length > 0 && (
@@ -340,6 +446,9 @@ export const TTSPlayerBar: React.FC<TTSPlayerBarProps> = ({
                 </select>
               </div>
             )}
+
+            {/* Safe bottom spacer for Android gesture navigation */}
+            <div className="w-full h-6 sm:h-2 shrink-0 pb-[env(safe-area-inset-bottom,0px)]" />
           </div>
         </div>
       )}

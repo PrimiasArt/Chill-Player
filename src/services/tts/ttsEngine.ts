@@ -1,5 +1,9 @@
 import type { TTSSettings, TTSEngineType } from '../../types';
 import { getApiBase } from '../apiConfig';
+import { db } from '../db';
+import { pronunciationService } from './pronunciation';
+import { shakeDetector } from './shakeDetector';
+import { ambientAudioService } from './ambientAudio';
 
 export type TTSState = 'idle' | 'playing' | 'paused';
 
@@ -84,6 +88,9 @@ class TTSEngine {
   private currentAuthor = '';
   private currentChapterTitle = '';
   private currentCoverUrl = '';
+  private currentStoryId = '';
+  private currentChapterNumber = 0;
+  private shakeCleanup: (() => void) | null = null;
 
   private settings: TTSSettings = {
     voiceURI: 'edge:vi-VN-NamMinhNeural',
@@ -102,6 +109,9 @@ class TTSEngine {
       }
       this.setupSilentAudio();
       this.setupAudioPlayers();
+
+      // Initialize custom pronunciation dictionary
+      pronunciationService.init().catch(() => {});
 
       // Expose globally for Android WebView Bridge callbacks
       (window as any).ttsEngine = this;
@@ -370,7 +380,14 @@ class TTSEngine {
    */
   public loadChapter(
     content: string, 
-    metadata: { title: string; author: string; chapterTitle: string; coverUrl?: string },
+    metadata: { 
+      title: string; 
+      author: string; 
+      chapterTitle: string; 
+      coverUrl?: string;
+      storyId?: string;
+      chapterNumber?: number;
+    },
     startFromSentenceIndex: number = 0
   ) {
     this.stop();
@@ -380,6 +397,8 @@ class TTSEngine {
     this.currentAuthor = metadata.author;
     this.currentChapterTitle = metadata.chapterTitle;
     this.currentCoverUrl = metadata.coverUrl || '';
+    this.currentStoryId = metadata.storyId || '';
+    this.currentChapterNumber = metadata.chapterNumber ?? 0;
 
     this.sentences = this.splitIntoSentences(content);
     this.currentSentenceIndex = Math.max(0, Math.min(startFromSentenceIndex, Math.max(0, this.sentences.length - 1)));
@@ -403,6 +422,9 @@ class TTSEngine {
 
     this.consecutiveErrors = 0;
     this.silentAudio?.play().catch(() => {});
+    if (ambientAudioService.getType() !== 'off') {
+      ambientAudioService.setSound(ambientAudioService.getType());
+    }
     this.notifyState('playing');
     this.speakCurrentSentence();
   }
@@ -422,6 +444,10 @@ class TTSEngine {
   public stop() {
     this.playbackToken++; // Invalidate pending async transitions
     this.playerLoadedSentenceIndex = [-1, -1];
+
+    if (ambientAudioService.getType() !== 'off') {
+      ambientAudioService.setSound('off');
+    }
 
     if (this.audioPlayers[0]) {
       this.audioPlayers[0].onended = null;
@@ -500,10 +526,11 @@ class TTSEngine {
   }
 
   private getAudioUrl(sentenceText: string): string {
+    const processedText = pronunciationService.applyRules(sentenceText);
     const voice = this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural';
     const isGoogle = voice.startsWith('google');
     const serverRate = isGoogle ? 1.0 : Math.min(2.0, Math.max(0.5, this.settings.rate));
-    return `${getTtsApiBase()}/api/tts?voice=${encodeURIComponent(voice)}&rate=${serverRate}&pitch=${this.settings.pitch}&text=${encodeURIComponent(sentenceText)}`;
+    return `${getTtsApiBase()}/api/tts?voice=${encodeURIComponent(voice)}&rate=${serverRate}&pitch=${this.settings.pitch}&text=${encodeURIComponent(processedText)}`;
   }
 
   /**
@@ -515,6 +542,22 @@ class TTSEngine {
     if (this.fetchingSentences.has(index)) return null;
 
     this.fetchingSentences.add(index);
+
+    // 1. Check offline IndexedDB cache first
+    if (this.currentStoryId) {
+      try {
+        const cachedBlob = await db.getOfflineAudio(this.currentStoryId, this.currentChapterNumber, index);
+        if (cachedBlob) {
+          const objectUrl = URL.createObjectURL(cachedBlob);
+          this.audioBlobCache.set(index, objectUrl);
+          this.fetchingSentences.delete(index);
+          return objectUrl;
+        }
+      } catch (e) {
+        console.warn('Error reading offline audio cache:', e);
+      }
+    }
+
     const text = this.sentences[index];
     const url = this.getAudioUrl(text);
 
@@ -522,6 +565,12 @@ class TTSEngine {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const blob = await res.blob();
+
+      // Save to offline cache asynchronously
+      if (this.currentStoryId) {
+        db.saveOfflineAudio(this.currentStoryId, this.currentChapterNumber, index, blob).catch(() => {});
+      }
+
       const objectUrl = URL.createObjectURL(blob);
       this.audioBlobCache.set(index, objectUrl);
       return objectUrl;
@@ -530,6 +579,47 @@ class TTSEngine {
     } finally {
       this.fetchingSentences.delete(index);
     }
+  }
+
+  /**
+   * Pre-download all audio sentences for the current chapter into Dexie offline cache
+   */
+  public async downloadChapterAudio(
+    storyId: string,
+    chapterNumber: number,
+    onProgress?: (done: number, total: number) => void
+  ): Promise<{ success: boolean; total: number; downloaded: number }> {
+    if (this.sentences.length === 0) {
+      return { success: false, total: 0, downloaded: 0 };
+    }
+
+    const total = this.sentences.length;
+    let downloaded = 0;
+
+    for (let i = 0; i < total; i++) {
+      try {
+        const existing = await db.getOfflineAudio(storyId, chapterNumber, i);
+        if (existing) {
+          downloaded++;
+          onProgress?.(downloaded, total);
+          continue;
+        }
+
+        const text = this.sentences[i];
+        const url = this.getAudioUrl(text);
+        const res = await fetch(url);
+        if (res.ok) {
+          const blob = await res.blob();
+          await db.saveOfflineAudio(storyId, chapterNumber, i, blob);
+        }
+      } catch (e) {
+        console.warn(`Failed to cache sentence ${i}:`, e);
+      }
+      downloaded++;
+      onProgress?.(downloaded, total);
+    }
+
+    return { success: true, total, downloaded };
   }
 
   /**
@@ -701,7 +791,8 @@ class TTSEngine {
     }
     this.synth.cancel();
 
-    const utterance = new SpeechSynthesisUtterance(sentence);
+    const processedText = pronunciationService.applyRules(sentence);
+    const utterance = new SpeechSynthesisUtterance(processedText);
     this.currentUtterance = utterance;
     utterance.rate = this.settings.rate;
     utterance.pitch = this.settings.pitch;
@@ -819,11 +910,24 @@ class TTSEngine {
     if (!minutes || minutes <= 0) {
       this.sleepTimerSeconds = null;
       this.notifyCountdown(null);
+      if (this.shakeCleanup) {
+        this.shakeCleanup();
+        this.shakeCleanup = null;
+      }
       return;
     }
 
     this.sleepTimerSeconds = minutes * 60;
     this.notifyCountdown(this.sleepTimerSeconds);
+
+    // Auto-extend sleep timer by 15 mins when user shakes the phone
+    if (!this.shakeCleanup) {
+      this.shakeCleanup = shakeDetector.addListener(() => {
+        if (this.sleepTimerSeconds !== null && this.sleepTimerSeconds > 0) {
+          this.extendSleepTimer(15);
+        }
+      });
+    }
 
     this.sleepCountdownInterval = window.setInterval(() => {
       if (this.sleepTimerSeconds !== null && this.sleepTimerSeconds > 0) {
@@ -836,6 +940,21 @@ class TTSEngine {
       this.pause();
       this.setSleepTimer(null);
     }, minutes * 60 * 1000);
+  }
+
+  public extendSleepTimer(extraMinutes: number = 15) {
+    if (this.sleepTimerSeconds === null) return;
+    const newSeconds = this.sleepTimerSeconds + extraMinutes * 60;
+    this.sleepTimerSeconds = newSeconds;
+    this.notifyCountdown(newSeconds);
+
+    if (this.sleepTimerId) {
+      window.clearTimeout(this.sleepTimerId);
+    }
+    this.sleepTimerId = window.setTimeout(() => {
+      this.pause();
+      this.setSleepTimer(null);
+    }, newSeconds * 1000);
   }
 
   /**

@@ -19,11 +19,16 @@ import {
   User,
   Zap,
   QrCode,
-  Share2
+  Share2,
+  SpellCheck,
+  CloudRain,
+  Plus
 } from 'lucide-react';
 import { db } from '../services/db';
 import { supabaseSync, type SupabaseConfig } from '../services/sync/supabaseSync';
 import { ttsEngine, type VoiceOption } from '../services/tts/ttsEngine';
+import { pronunciationService, type PronunciationRule } from '../services/tts/pronunciation';
+import { ambientAudioService, AMBIENT_SOUND_OPTIONS, type AmbientSoundType } from '../services/tts/ambientAudio';
 import type { ReaderSettings, TTSSettings } from '../types';
 
 interface SettingsViewProps {
@@ -64,9 +69,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [testingVoiceId, setTestingVoiceId] = useState<string | null>(null);
   const [voices, setVoices] = useState<VoiceOption[]>([]);
 
+  // Pronunciation Dictionary state
+  const [pronRules, setPronRules] = useState<PronunciationRule[]>([]);
+  const [newPattern, setNewPattern] = useState('');
+  const [newReplacement, setNewReplacement] = useState('');
+  const [showAddRule, setShowAddRule] = useState(false);
+
+  // Ambient sound state
+  const [ambientType, setAmbientType] = useState<AmbientSoundType>(ambientAudioService.getType());
+  const [ambientVol, setAmbientVol] = useState<number>(ambientAudioService.getVolume());
+  const [clearedAudioMsg, setClearedAudioMsg] = useState<string | null>(null);
+
   useEffect(() => {
     supabaseSync.init().then(() => {
       setCloudConfig(supabaseSync.getConfig());
+    });
+
+    pronunciationService.init().then((rules) => {
+      setPronRules(rules);
     });
 
     setVoices(ttsEngine.getAllAvailableVoices());
@@ -76,6 +96,45 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       };
     }
   }, []);
+
+  const handleAddRule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPattern.trim() || !newReplacement.trim()) return;
+    const updated = await pronunciationService.saveRule({
+      pattern: newPattern.trim(),
+      replacement: newReplacement.trim(),
+      enabled: true
+    });
+    setPronRules(updated);
+    setNewPattern('');
+    setNewReplacement('');
+    setShowAddRule(false);
+  };
+
+  const handleToggleRule = async (id: string) => {
+    const updated = await pronunciationService.toggleRule(id);
+    setPronRules(updated);
+  };
+
+  const handleDeleteRule = async (id: string) => {
+    const updated = await pronunciationService.deleteRule(id);
+    setPronRules(updated);
+  };
+
+  const handleResetRules = async () => {
+    const updated = await pronunciationService.resetDefaults();
+    setPronRules(updated);
+  };
+
+  const handleClearAudioCache = async () => {
+    try {
+      await db.offlineAudioCache.clear();
+      setClearedAudioMsg('Đã giải phóng bộ nhớ Cache Audio!');
+      setTimeout(() => setClearedAudioMsg(null), 3000);
+    } catch {
+      setClearedAudioMsg('Lỗi khi xóa cache.');
+    }
+  };
 
   const handleTestVoice = async (voiceId: string) => {
     if (testingVoiceId) return;
@@ -849,19 +908,197 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
         </div>
       </div>
 
-      {/* 5. DATA RESET */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 flex items-center justify-between">
-        <div>
-          <h3 className="font-semibold text-sm text-zinc-100">Dọn dẹp bộ nhớ thiết bị</h3>
-          <p className="text-xs text-zinc-400 mt-0.5">Xóa toàn bộ các truyện đã lưu trong IndexedDB của trình duyệt</p>
+      {/* 5. AMBIENT BACKGROUND SOUNDS */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CloudRain className="w-5 h-5 text-amber-400" />
+            <h3 className="font-semibold text-sm text-zinc-100">Âm thanh nền thư giãn</h3>
+          </div>
+          {ambientType !== 'off' && (
+            <span className="text-xs text-amber-400 font-bold bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-500/20">
+              Âm lượng: {Math.round(ambientVol * 100)}%
+            </span>
+          )}
         </div>
-        <button
-          onClick={handleClearAll}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-red-500/40 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-medium transition-colors cursor-pointer"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-          Xóa toàn bộ
-        </button>
+        <p className="text-xs text-zinc-400">
+          Tự động phối tiếng mưa rơi, củi lửa tí tách hoặc gió rừng trúc cùng giọng đọc truyện giúp ngủ ngon và thư giãn sâu.
+        </p>
+
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          {AMBIENT_SOUND_OPTIONS.map((opt) => (
+            <button
+              key={opt.id}
+              onClick={() => {
+                setAmbientType(opt.id);
+                ambientAudioService.setSound(opt.id);
+              }}
+              className={`p-2.5 rounded-xl border text-xs font-medium transition-all text-left flex flex-col gap-1 cursor-pointer ${
+                ambientType === opt.id
+                  ? 'border-amber-500 bg-amber-500/10 text-amber-300 font-bold shadow-xs'
+                  : 'border-zinc-800 bg-zinc-950/60 text-zinc-300 hover:border-zinc-700'
+              }`}
+            >
+              <span className="font-semibold text-xs">{opt.name}</span>
+              <span className="text-[10px] text-zinc-400 line-clamp-1">{opt.description}</span>
+            </button>
+          ))}
+        </div>
+
+        {ambientType !== 'off' && (
+          <div className="space-y-1.5 pt-2 border-t border-zinc-800">
+            <div className="flex justify-between text-xs text-zinc-400">
+              <span>Âm lượng âm nền</span>
+              <span className="font-semibold text-zinc-200">{Math.round(ambientVol * 100)}%</span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={ambientVol}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                setAmbientVol(v);
+                ambientAudioService.setVolume(v);
+              }}
+              className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+            />
+          </div>
+        )}
+      </div>
+
+      {/* 6. PRONUNCIATION DICTIONARY */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <SpellCheck className="w-5 h-5 text-amber-400" />
+            <h3 className="font-semibold text-sm text-zinc-100">Từ điển phát âm tuỳ chỉnh (TTS)</h3>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleResetRules}
+              className="text-[11px] text-zinc-400 hover:text-zinc-200 underline cursor-pointer"
+            >
+              Mặc định
+            </button>
+            <button
+              onClick={() => setShowAddRule(!showAddRule)}
+              className="flex items-center gap-1 px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs rounded-lg transition-all cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Thêm từ</span>
+            </button>
+          </div>
+        </div>
+        <p className="text-xs text-zinc-400">
+          Tự động thay thế các từ viết tắt, từ ngọng (vd: <code className="bg-zinc-800 px-1 py-0.5 rounded text-amber-300">ko</code> ➔ <code className="bg-zinc-800 px-1 py-0.5 rounded text-amber-300">không</code>, <code className="bg-zinc-800 px-1 py-0.5 rounded text-amber-300">main</code> ➔ <code className="bg-zinc-800 px-1 py-0.5 rounded text-amber-300">nhân vật chính</code>) để giọng đọc phát âm chuẩn xác nhất.
+        </p>
+
+        {showAddRule && (
+          <form onSubmit={handleAddRule} className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl space-y-2.5 animate-in fade-in">
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="text"
+                placeholder="Từ gốc trong truyện (vd: ad, cv, bl...)"
+                value={newPattern}
+                onChange={(e) => setNewPattern(e.target.value)}
+                required
+                className="bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-amber-500"
+              />
+              <input
+                type="text"
+                placeholder="Từ đọc thay thế (vd: admin, dịch, bình luận...)"
+                value={newReplacement}
+                onChange={(e) => setNewReplacement(e.target.value)}
+                required
+                className="bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAddRule(false)}
+                className="px-2.5 py-1 text-xs text-zinc-400 hover:text-zinc-200"
+              >
+                Hủy
+              </button>
+              <button
+                type="submit"
+                className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs rounded-lg cursor-pointer"
+              >
+                Lưu quy tắc
+              </button>
+            </div>
+          </form>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
+          {pronRules.map((r) => (
+            <div
+              key={r.id}
+              className={`p-2.5 rounded-xl border flex items-center justify-between text-xs transition-all ${
+                r.enabled
+                  ? 'bg-zinc-950/70 border-zinc-800'
+                  : 'bg-zinc-950/30 border-zinc-800/40 opacity-50'
+              }`}
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <input
+                  type="checkbox"
+                  checked={r.enabled}
+                  onChange={() => handleToggleRule(r.id)}
+                  className="w-3.5 h-3.5 accent-amber-500 rounded cursor-pointer"
+                />
+                <span className="font-mono text-zinc-300 font-semibold">{r.pattern.replace(/\\b/g, '')}</span>
+                <span className="text-zinc-500">➔</span>
+                <span className="text-amber-400 font-medium truncate">{r.replacement}</span>
+              </div>
+              <button
+                onClick={() => handleDeleteRule(r.id)}
+                className="text-zinc-500 hover:text-red-400 p-1 transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 7. DATA RESET */}
+      <div className="space-y-3">
+        {/* Offline Audio Cache Reset */}
+        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-sm text-zinc-100">Bộ nhớ Cache Audio ngoại tuyến</h3>
+            <p className="text-xs text-zinc-400 mt-0.5">Xóa toàn bộ các tệp âm thanh đã tải về để nghe offline nhằm giải phóng dung lượng máy</p>
+            {clearedAudioMsg && (
+              <span className="text-xs text-emerald-400 font-medium mt-1 block">{clearedAudioMsg}</span>
+            )}
+          </div>
+          <button
+            onClick={handleClearAudioCache}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-xs font-medium transition-colors cursor-pointer shrink-0"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            Xóa Audio Cache
+          </button>
+        </div>
+
+        {/* Full Stories Reset */}
+        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-sm text-zinc-100">Dọn dẹp toàn bộ dữ liệu truyện</h3>
+            <p className="text-xs text-zinc-400 mt-0.5">Xóa toàn bộ các truyện và chương đã lưu trong IndexedDB của máy</p>
+          </div>
+          <button
+            onClick={handleClearAll}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-red-500/40 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-medium transition-colors cursor-pointer shrink-0"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            Xóa toàn bộ
+          </button>
+        </div>
       </div>
 
       {/* App Info */}

@@ -15,13 +15,18 @@ import {
   Download,
   BookOpen,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  RefreshCw,
+  FileDown,
+  BookMarked
 } from 'lucide-react';
 import type { Story, Chapter, ReaderSettings, ReaderTheme, FontFamily, CrawlSearchResult } from '../types';
 import { ttsEngine, type TTSState } from '../services/tts/ttsEngine';
 import { supabaseSync } from '../services/sync/supabaseSync';
 import { fetchStoryDetail, batchDownloadChapters, searchStories } from '../services/crawler';
 import { db } from '../services/db';
+import { StoryNotesDrawer } from './StoryNotesDrawer';
+import { exportStoryToEpub, exportStoryToTxt } from '../services/export/epubExport';
 
 interface ReaderViewProps {
   story: Story;
@@ -59,10 +64,25 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   const [showControls, setShowControls] = useState(true);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showTocDrawer, setShowTocDrawer] = useState(false);
+  const [showNotesDrawer, setShowNotesDrawer] = useState(false);
 
   // Quick jump & TOC search states
   const [tocSearch, setTocSearch] = useState('');
   const [quickJumpInput, setQuickJumpInput] = useState('');
+  const [tocScrollTop, setTocScrollTop] = useState(0);
+  const tocContainerRef = useRef<HTMLDivElement>(null);
+
+  // Paged mode pagination state
+  const [currentPageIndex, setCurrentPageIndex] = useState(0);
+
+  // Check new chapters state
+  const [isCheckingNewChapters, setIsCheckingNewChapters] = useState(false);
+  const [checkNewMsg, setCheckNewMsg] = useState<string | null>(null);
+
+  // Audio download and export states
+  const [isDownloadingAudio, setIsDownloadingAudio] = useState(false);
+  const [audioDownloadProgress, setAudioDownloadProgress] = useState<{ done: number; total: number } | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
 
   // On-demand download state for empty chapters
   const [isDownloadingChapters, setIsDownloadingChapters] = useState(false);
@@ -214,7 +234,6 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const sentenceRefs = useRef<(HTMLSpanElement | null)[]>([]);
-  const currentChapterButtonRef = useRef<HTMLButtonElement | null>(null);
 
   // Touch gesture tracker to distinguish scrolling/swiping from clicking
   const touchStartPos = useRef<{ x: number; y: number } | null>(null);
@@ -243,9 +262,165 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
     return ttsEngine.splitIntoSentences(currentChapter.content);
   }, [currentChapter]);
 
+  // Paged mode calculations
+  const sentencesPerPage = 8;
+  const totalPages = Math.max(1, Math.ceil(sentences.length / sentencesPerPage));
+
+  // Reset page when chapter changes
+  useEffect(() => {
+    setCurrentPageIndex(0);
+  }, [currentChapterNumber]);
+
+  // Turn page automatically when TTS reads in paged mode
+  useEffect(() => {
+    if (settings.readerMode === 'paged' && ttsState !== 'idle' && activeSentenceIndex >= 0) {
+      const pageOfActiveSentence = Math.floor(activeSentenceIndex / sentencesPerPage);
+      if (pageOfActiveSentence !== currentPageIndex && pageOfActiveSentence < totalPages) {
+        setCurrentPageIndex(pageOfActiveSentence);
+      }
+    }
+  }, [activeSentenceIndex, settings.readerMode, ttsState, totalPages, currentPageIndex]);
+
+  // Virtual scrolling parameters for TOC
+  const ITEM_HEIGHT = 40;
+  const filteredChapters = chapters.filter(c => 
+    !tocSearch.trim() || 
+    c.title.toLowerCase().includes(tocSearch.toLowerCase()) || 
+    c.chapterNumber.toString().includes(tocSearch.trim())
+  );
+  const startIndex = Math.max(0, Math.floor(tocScrollTop / ITEM_HEIGHT) - 5);
+  const endIndex = Math.min(filteredChapters.length, Math.ceil((tocScrollTop + 600) / ITEM_HEIGHT) + 5);
+  const visibleChapters = filteredChapters.slice(startIndex, endIndex);
+  const totalHeight = filteredChapters.length * ITEM_HEIGHT;
+
+  // Auto-scroll TOC drawer to current chapter when drawer opens
+  useEffect(() => {
+    if (showTocDrawer) {
+      const idx = filteredChapters.findIndex(c => c.chapterNumber === currentChapterNumber);
+      if (idx >= 0 && tocContainerRef.current) {
+        const timer = setTimeout(() => {
+          if (tocContainerRef.current) {
+            tocContainerRef.current.scrollTop = Math.max(0, idx * ITEM_HEIGHT - 160);
+          }
+        }, 50);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [showTocDrawer, currentChapterNumber]);
+
+  // Handle Check New Chapters
+  const handleCheckNewChapters = async () => {
+    if (!story.sourceUrl) {
+      setCheckNewMsg('Truyện này chưa có liên kết nguồn trực tuyến.');
+      setTimeout(() => setCheckNewMsg(null), 3500);
+      return;
+    }
+    setIsCheckingNewChapters(true);
+    setCheckNewMsg('Đang kiểm tra chương mới...');
+    try {
+      const detail = await fetchStoryDetail(story.sourceUrl);
+      if (detail && detail.chapters && detail.chapters.length > chapters.length) {
+        const newChapters = detail.chapters.slice(chapters.length);
+        setCheckNewMsg(`Tìm thấy ${newChapters.length} chương mới! Đang tải nội dung...`);
+        const downloadedResults = await batchDownloadChapters(
+          newChapters,
+          (curr, tot) => {
+            setCheckNewMsg(`Đang tải (${curr}/${tot})...`);
+          }
+        );
+        const chaptersToSave: Chapter[] = downloadedResults
+          .filter(r => r.success && r.content)
+          .map((r, idx) => ({
+            id: `${story.id}_${newChapters[idx].number}`,
+            storyId: story.id,
+            chapterNumber: newChapters[idx].number,
+            title: r.title || newChapters[idx].title,
+            content: r.content,
+            wordCount: r.wordCount,
+            sourceUrl: r.url
+          }));
+        await db.saveStoryChapters(chaptersToSave);
+        await db.stories.update(story.id, { totalChapters: detail.chapters.length });
+        if (onReloadChapters) await onReloadChapters();
+        setCheckNewMsg(`Thành công! Đã thêm ${chaptersToSave.length} chương mới.`);
+      } else {
+        setCheckNewMsg('Truyện đã ở chương mới nhất!');
+      }
+    } catch (e: any) {
+      setCheckNewMsg(`Lỗi kiểm tra: ${e.message || 'Không thể kết nối'}`);
+    } finally {
+      setIsCheckingNewChapters(false);
+      setTimeout(() => setCheckNewMsg(null), 4000);
+    }
+  };
+
+  // 1-Click Download Current Chapter Audio
+  const handleDownloadChapterAudio = async () => {
+    if (sentences.length === 0) return;
+    setIsDownloadingAudio(true);
+    setAudioDownloadProgress({ done: 0, total: sentences.length });
+    try {
+      await ttsEngine.downloadChapterAudio(
+        story.id,
+        currentChapter.chapterNumber,
+        (done, total) => {
+          setAudioDownloadProgress({ done, total });
+        }
+      );
+      setCheckNewMsg(`Đã tải ngoại tuyến cả chương (${sentences.length} câu) thành công!`);
+    } catch (e) {
+      setCheckNewMsg('Tải audio thất bại. Vui lòng thử lại.');
+    } finally {
+      setIsDownloadingAudio(false);
+      setAudioDownloadProgress(null);
+      setTimeout(() => setCheckNewMsg(null), 3500);
+    }
+  };
+
+  // Export handlers
+  const handleExportEpub = async () => {
+    try {
+      setIsExporting(true);
+      const allChapters = await db.getStoryChapters(story.id);
+      const blob = await exportStoryToEpub(story, allChapters);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${story.title.replace(/[\\/:*?"<>|]/g, '_')}.epub`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.warn('Export EPUB error:', e);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleExportTxt = async () => {
+    try {
+      setIsExporting(true);
+      const allChapters = await db.getStoryChapters(story.id);
+      const blob = exportStoryToTxt(story, allChapters);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${story.title.replace(/[\\/:*?"<>|]/g, '_')}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.warn('Export TXT error:', e);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   // Scroll to active sentence ONLY if it is out of the visible screen viewport
   useEffect(() => {
-    if (ttsState === 'playing' && sentenceRefs.current[activeSentenceIndex]) {
+    if (settings.readerMode !== 'paged' && ttsState === 'playing' && sentenceRefs.current[activeSentenceIndex]) {
       const el = sentenceRefs.current[activeSentenceIndex];
       if (el) {
         const rect = el.getBoundingClientRect();
@@ -258,17 +433,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
         }
       }
     }
-  }, [activeSentenceIndex, ttsState]);
-
-  // Auto-scroll TOC drawer to current chapter when drawer opens
-  useEffect(() => {
-    if (showTocDrawer) {
-      const timer = setTimeout(() => {
-        currentChapterButtonRef.current?.scrollIntoView({ block: 'center' });
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-  }, [showTocDrawer]);
+  }, [activeSentenceIndex, ttsState, settings.readerMode]);
 
   // Handle click on specific sentence to listen from that sentence (guarded against swipes)
   const handleSentenceClick = (index: number) => {
@@ -281,7 +446,9 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
           title: story.title,
           author: story.author,
           chapterTitle: currentChapter.title,
-          coverUrl: story.coverUrl
+          coverUrl: story.coverUrl,
+          storyId: story.id,
+          chapterNumber: currentChapter.chapterNumber
         },
         index
       );
@@ -308,15 +475,6 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
       jumpToChapter(num);
     }
   };
-
-  // Filter chapters for TOC
-  const filteredChapters = chapters.filter(c => {
-    if (!tocSearch.trim()) return true;
-    const q = tocSearch.trim().toLowerCase();
-    return c.chapterNumber.toString() === q ||
-           c.title.toLowerCase().includes(q) ||
-           `chương ${c.chapterNumber}`.includes(q);
-  });
 
   const getThemeClass = (theme: ReaderTheme) => {
     switch (theme) {
@@ -398,6 +556,27 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
               <span>{ttsState === 'playing' ? 'Đang nghe' : (ttsState === 'paused' ? 'Tạm dừng' : 'Nghe audio')}</span>
             </button>
 
+            {/* Story Lore & Character Notes */}
+            <button
+              onClick={() => setShowNotesDrawer(true)}
+              className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-amber-400 transition-colors cursor-pointer"
+              title="Sổ tay nhân vật & cảnh giới tu tiên"
+            >
+              <BookMarked className="w-5 h-5" />
+            </button>
+
+            {/* Check for new chapters if online story */}
+            {story.sourceUrl && (
+              <button
+                disabled={isCheckingNewChapters}
+                onClick={handleCheckNewChapters}
+                className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-amber-400 transition-colors cursor-pointer disabled:opacity-40"
+                title="Kiểm tra & tải thêm chương mới"
+              >
+                <RefreshCw className={`w-5 h-5 ${isCheckingNewChapters ? 'animate-spin text-amber-400' : ''}`} />
+              </button>
+            )}
+
             {/* Table of contents */}
             <button
               disabled={chapters.length === 0}
@@ -420,6 +599,13 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Status Toast Banner for Check New Chapters / Offline Audio */}
+        {checkNewMsg && (
+          <div className="bg-amber-500/90 text-zinc-950 font-semibold text-xs py-1.5 px-4 text-center transition-all animate-in fade-in slide-in-from-top-1">
+            {checkNewMsg}
+          </div>
+        )}
       </div>
 
       {/* Main Reading Text Area or Empty State */}
@@ -553,7 +739,9 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
           onClick={() => setShowControls(!showControls)}
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
-          className="flex-1 max-w-3xl mx-auto w-full px-5 sm:px-8 py-20 transition-all select-text cursor-default"
+          className={`flex-1 max-w-3xl mx-auto w-full px-5 sm:px-8 pt-20 transition-all select-text cursor-default ${
+            ttsState !== 'idle' ? 'pb-36' : 'pb-20'
+          }`}
           style={{
             ...getFontFamilyStyle(settings.fontFamily),
             fontSize: `${settings.fontSize}px`,
@@ -571,27 +759,86 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
             </p>
           </div>
 
-          {/* Text Sentences */}
-          <div className="space-y-4">
-            {sentences.map((sentence, idx) => {
-              const isActive = ttsState !== 'idle' && idx === activeSentenceIndex;
-              return (
-                <span
-                  key={idx}
-                  ref={(el) => { sentenceRefs.current[idx] = el; }}
+          {/* Text Sentences - Paged vs Continuous Scroll */}
+          {settings.readerMode === 'paged' ? (
+            <div className="flex flex-col min-h-[55vh] justify-between">
+              <div className="space-y-4">
+                {sentences
+                  .slice(currentPageIndex * sentencesPerPage, (currentPageIndex + 1) * sentencesPerPage)
+                  .map((sentence, localIdx) => {
+                    const sentenceIdx = currentPageIndex * sentencesPerPage + localIdx;
+                    const isActive = ttsState !== 'idle' && sentenceIdx === activeSentenceIndex;
+                    return (
+                      <span
+                        key={sentenceIdx}
+                        ref={(el) => { sentenceRefs.current[sentenceIdx] = el; }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSentenceClick(sentenceIdx);
+                        }}
+                        className={`inline-block mr-1 rounded px-0.5 transition-colors cursor-pointer hover:bg-amber-500/10 ${
+                          isActive ? 'tts-highlight font-medium' : ''
+                        }`}
+                      >
+                        {sentence}{' '}
+                      </span>
+                    );
+                  })}
+              </div>
+
+              {/* Paged Navigation Bar */}
+              <div className="mt-8 pt-4 border-t border-current opacity-30 flex items-center justify-between text-xs">
+                <button
+                  disabled={currentPageIndex === 0}
                   onClick={(e) => {
                     e.stopPropagation();
-                    handleSentenceClick(idx);
+                    setCurrentPageIndex(p => Math.max(0, p - 1));
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
                   }}
-                  className={`inline-block mr-1 rounded px-0.5 transition-colors cursor-pointer hover:bg-amber-500/10 ${
-                    isActive ? 'tts-highlight font-medium' : ''
-                  }`}
+                  className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 cursor-pointer flex items-center gap-1"
                 >
-                  {sentence}{' '}
+                  <ChevronLeft className="w-3.5 h-3.5" /> Trang trước
+                </button>
+
+                <span className="font-mono text-xs opacity-80">
+                  Trang {currentPageIndex + 1} / {totalPages}
                 </span>
-              );
-            })}
-          </div>
+
+                <button
+                  disabled={currentPageIndex >= totalPages - 1}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCurrentPageIndex(p => Math.min(totalPages - 1, p + 1));
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 cursor-pointer flex items-center gap-1"
+                >
+                  Trang sau <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {sentences.map((sentence, idx) => {
+                const isActive = ttsState !== 'idle' && idx === activeSentenceIndex;
+                return (
+                  <span
+                    key={idx}
+                    ref={(el) => { sentenceRefs.current[idx] = el; }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleSentenceClick(idx);
+                    }}
+                    className={`inline-block mr-1 rounded px-0.5 transition-colors cursor-pointer hover:bg-amber-500/10 ${
+                      isActive ? 'tts-highlight font-medium' : ''
+                    }`}
+                  >
+                    {sentence}{' '}
+                  </span>
+                );
+              })}
+            </div>
+          )}
 
           {/* Chapter Bottom Navigation */}
           <div className="mt-16 pt-8 border-t border-current opacity-20 flex items-center justify-between gap-4">
@@ -763,11 +1010,82 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                 className="w-full accent-amber-500"
               />
             </div>
+
+            {/* Reader Mode (Cuộn liên tục vs Lật trang) */}
+            <div className="pt-2 border-t border-zinc-800">
+              <label className="text-[11px] text-zinc-400 font-medium block mb-2">Chế độ đọc</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => onUpdateSettings({ readerMode: 'scroll' })}
+                  className={`py-1.5 rounded-lg border text-xs font-medium transition-all ${
+                    settings.readerMode === 'scroll'
+                      ? 'border-amber-500 bg-amber-500/10 text-amber-300 font-bold'
+                      : 'border-zinc-700 text-zinc-300'
+                  }`}
+                >
+                  Cuộn liên tục
+                </button>
+                <button
+                  onClick={() => onUpdateSettings({ readerMode: 'paged' })}
+                  className={`py-1.5 rounded-lg border text-xs font-medium transition-all ${
+                    settings.readerMode === 'paged'
+                      ? 'border-amber-500 bg-amber-500/10 text-amber-300 font-bold'
+                      : 'border-zinc-700 text-zinc-300'
+                  }`}
+                >
+                  Lật trang (Kindle)
+                </button>
+              </div>
+            </div>
+
+            {/* Offline Audio Download */}
+            <div className="pt-2 border-t border-zinc-800">
+              <button
+                disabled={isDownloadingAudio || sentences.length === 0}
+                onClick={handleDownloadChapterAudio}
+                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-medium hover:bg-amber-500/30 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {isDownloadingAudio ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Đang tải audio ({audioDownloadProgress ? `${audioDownloadProgress.done}/${audioDownloadProgress.total}` : '...'})</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Tải Audio ngoại tuyến chương này</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Export Story */}
+            <div className="pt-2 border-t border-zinc-800">
+              <label className="text-[11px] text-zinc-400 font-medium block mb-1.5">Xuất truyện về máy</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  disabled={isExporting}
+                  onClick={handleExportEpub}
+                  className="py-1.5 px-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs text-zinc-200 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <FileDown className="w-3.5 h-3.5 text-amber-400" />
+                  <span>File .EPUB</span>
+                </button>
+                <button
+                  disabled={isExporting}
+                  onClick={handleExportTxt}
+                  className="py-1.5 px-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs text-zinc-200 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <FileDown className="w-3.5 h-3.5 text-zinc-400" />
+                  <span>File .TXT</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Table of Contents Drawer */}
+      {/* Table of Contents Drawer with High-Performance Virtual Scrolling */}
       {showTocDrawer && (
         <div 
           className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex justify-end"
@@ -848,7 +1166,13 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  currentChapterButtonRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  const idx = filteredChapters.findIndex(c => c.chapterNumber === currentChapterNumber);
+                  if (idx >= 0 && tocContainerRef.current) {
+                    tocContainerRef.current.scrollTo({
+                      top: Math.max(0, idx * ITEM_HEIGHT - 160),
+                      behavior: 'smooth'
+                    });
+                  }
                 }}
                 className="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 font-medium transition-colors shrink-0 cursor-pointer"
               >
@@ -868,43 +1192,64 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
               )}
             </div>
 
-            {/* Chapter List */}
-            <div className="flex-1 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
+            {/* Virtualized Chapter List for 60fps Scrolling */}
+            <div 
+              ref={tocContainerRef}
+              onScroll={(e) => setTocScrollTop(e.currentTarget.scrollTop)}
+              className="flex-1 overflow-y-auto pr-1 custom-scrollbar relative"
+            >
               {filteredChapters.length === 0 ? (
                 <div className="py-8 text-center text-xs text-zinc-500">
                   Không tìm thấy chương nào khớp với "{tocSearch}"
                 </div>
               ) : (
-                filteredChapters.map((ch) => {
-                  const isCurrent = ch.chapterNumber === currentChapterNumber;
-                  return (
-                    <button
-                      key={ch.id}
-                      ref={isCurrent ? currentChapterButtonRef : null}
-                      onClick={() => jumpToChapter(ch.chapterNumber)}
-                      className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between transition-colors cursor-pointer ${
-                        isCurrent
-                          ? 'bg-amber-500/20 text-amber-300 font-semibold border border-amber-500/30 shadow-xs'
-                          : 'text-zinc-300 hover:bg-zinc-800/80 hover:text-zinc-100'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 min-w-0 pr-2">
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono shrink-0 ${
-                          isCurrent ? 'bg-amber-500/30 text-amber-200' : 'bg-zinc-800 text-zinc-400'
-                        }`}>
-                          #{ch.chapterNumber}
-                        </span>
-                        <span className="truncate">{ch.title}</span>
-                      </div>
-                      {isCurrent && <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
-                    </button>
-                  );
-                })
+                <div style={{ height: `${totalHeight}px`, position: 'relative' }}>
+                  {visibleChapters.map((ch, localIdx) => {
+                    const actualIdx = startIndex + localIdx;
+                    const isCurrent = ch.chapterNumber === currentChapterNumber;
+                    return (
+                      <button
+                        key={ch.id}
+                        onClick={() => jumpToChapter(ch.chapterNumber)}
+                        style={{
+                          position: 'absolute',
+                          top: `${actualIdx * ITEM_HEIGHT}px`,
+                          left: 0,
+                          right: 0,
+                          height: '36px'
+                        }}
+                        className={`w-full text-left px-3 rounded-xl text-xs flex items-center justify-between transition-colors cursor-pointer ${
+                          isCurrent
+                            ? 'bg-amber-500/20 text-amber-300 font-semibold border border-amber-500/30 shadow-xs'
+                            : 'text-zinc-300 hover:bg-zinc-800/80 hover:text-zinc-100'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0 pr-2">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono shrink-0 ${
+                            isCurrent ? 'bg-amber-500/30 text-amber-200' : 'bg-zinc-800 text-zinc-400'
+                          }`}>
+                            #{ch.chapterNumber}
+                          </span>
+                          <span className="truncate">{ch.title}</span>
+                        </div>
+                        {isCurrent && <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </div>
         </div>
       )}
+
+      {/* Story Lore & Cultivation Notes Drawer */}
+      <StoryNotesDrawer
+        isOpen={showNotesDrawer}
+        onClose={() => setShowNotesDrawer(false)}
+        storyId={story.id}
+        storyTitle={story.title}
+      />
     </div>
   );
 };
