@@ -10,6 +10,7 @@ dist-ssr/
 *.apk
 Sample_App.apk
 ChillPlayer*.apk
+sample/
 
 # Logs
 npm-debug.log*

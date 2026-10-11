@@ -1,54 +1,74 @@
 import React from 'react';
-import { Settings, Globe, FolderPlus } from 'lucide-react';
+import { Settings, Globe, ShieldCheck, Lock, Sparkles } from 'lucide-react';
 
 interface HeaderProps {
   onOpenSettings: () => void;
   onOpenNetworkStream: () => void;
+  onOpenVault: () => void;
+  isVaultActive?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   onOpenSettings,
-  onOpenNetworkStream
+  onOpenNetworkStream,
+  onOpenVault,
+  isVaultActive = false
 }) => {
   return (
-    <header className="sticky top-0 z-30 w-full bg-zinc-950/80 backdrop-blur-md border-b border-zinc-800/80 px-4 py-3">
-      <div className="max-w-6xl mx-auto flex items-center justify-between">
-        {/* Brand Logo & Name */}
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl overflow-hidden border border-zinc-700/80 shadow-md shadow-emerald-500/10 flex items-center justify-center bg-white">
+    <header className="sticky top-0 z-30 w-full px-4 py-3 pointer-events-none">
+      <div className="max-w-6xl mx-auto flex items-center justify-between pointer-events-auto">
+        {/* Brand Logo & visionOS Frosted Pill */}
+        <div className="flex items-center gap-3 p-1.5 pr-4 rounded-full vision-glass">
+          <div className="w-8 h-8 rounded-full overflow-hidden border border-white/20 shadow-md shadow-emerald-500/10 flex items-center justify-center bg-zinc-900">
             <img src="/favicon.png" alt="Chill Player" className="w-full h-full object-cover" />
           </div>
           <div>
             <div className="flex items-center gap-1.5">
-              <span className="font-extrabold text-sm tracking-wider text-zinc-100 uppercase">
+              <span className="font-extrabold text-xs tracking-wider text-white uppercase">
                 Chill Player
               </span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-400 font-bold border border-emerald-500/20">
-                NKI
+              <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
+                Spatial
               </span>
             </div>
-            <span className="text-[11px] text-zinc-400 block -mt-0.5">
-              Trình phát Media & Video Đỉnh Cao
+            <span className="text-[10px] text-zinc-400 block -mt-0.5 font-light">
+              visionOS Media Experience
             </span>
           </div>
         </div>
 
-        {/* Header Right Actions */}
-        <div className="flex items-center gap-2">
+        {/* Header Right Actions - visionOS Floating Glass Buttons */}
+        <div className="flex items-center gap-2 p-1.5 rounded-full vision-glass">
+          {/* Private Vault Button */}
           <button
-            onClick={onOpenNetworkStream}
-            className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 hover:border-zinc-700 transition-colors cursor-pointer"
-            title="Mở luồng trực tuyến (Stream URL)"
+            onClick={onOpenVault}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+              isVaultActive
+                ? 'bg-emerald-500 text-zinc-950 font-bold shadow-md shadow-emerald-500/20'
+                : 'vision-btn-circle text-zinc-300 hover:text-white hover:border-emerald-500/40'
+            }`}
+            title="Két Riêng Tư (Private Vault)"
           >
-            <Globe className="w-4 h-4 text-emerald-400" />
+            <Lock className={`w-3.5 h-3.5 ${isVaultActive ? 'text-zinc-950' : 'text-emerald-400'}`} />
+            <span className="hidden sm:inline">Két Ẩn</span>
           </button>
 
+          {/* Stream URL */}
+          <button
+            onClick={onOpenNetworkStream}
+            className="w-8 h-8 rounded-full vision-btn-circle text-zinc-300 hover:text-white flex items-center justify-center cursor-pointer"
+            title="Mở luồng trực tuyến (Stream URL)"
+          >
+            <Globe className="w-3.5 h-3.5 text-sky-400" />
+          </button>
+
+          {/* Settings */}
           <button
             onClick={onOpenSettings}
-            className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 hover:border-zinc-700 transition-colors cursor-pointer"
+            className="w-8 h-8 rounded-full vision-btn-circle text-zinc-300 hover:text-white flex items-center justify-center cursor-pointer"
             title="Cài đặt"
           >
-            <Settings className="w-4 h-4" />
+            <Settings className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>

@@ -12,26 +12,32 @@ import {
   FileVideo, 
   Layers, 
   Sparkles, 
-  HardDrive
+  HardDrive,
+  Lock,
+  ShieldCheck
 } from 'lucide-react';
 import type { MediaItem } from '../types';
 import { db } from '../services/db';
+import { vaultService } from '../services/vaultService';
 
 interface MediaLibraryProps {
   items: MediaItem[];
   onPlayMedia: (item: MediaItem) => void;
   onOpenNetworkStream: () => void;
   onRefreshItems: () => Promise<void>;
+  onOpenVault: () => void;
 }
 
 export const MediaLibrary: React.FC<MediaLibraryProps> = ({
   items,
   onPlayMedia,
   onOpenNetworkStream,
-  onRefreshItems
+  onRefreshItems,
+  onOpenVault
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'video' | 'audio' | 'stream' | 'favorites'>('all');
+  const [movingId, setMovingId] = useState<string | null>(null);
 
   // Format file size
   const formatBytes = (bytes?: number) => {
@@ -89,6 +95,33 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({
     await onRefreshItems();
   };
 
+  // Move item to encrypted vault
+  const handleMoveToVault = async (item: MediaItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!vaultService.isUnlocked()) {
+      alert('Vui lòng mở khóa Két riêng tư (Private Vault) trước khi chuyển tệp vào!');
+      onOpenVault();
+      return;
+    }
+
+    if (confirm(`Bạn muốn mã hóa và chuyển "${item.title}" vào Két bí mật? Tệp sẽ biến mất khỏi thư viện thông thường.`)) {
+      setMovingId(item.id);
+      try {
+        const ok = await vaultService.moveItemToVault(item);
+        if (ok) {
+          await onRefreshItems();
+          alert('Đã mã hóa và chuyển tệp vào Két thành công! 🔒');
+        } else {
+          alert('Không thể chuyển tệp vào Két. Hãy chắc chắn tệp còn tồn tại.');
+        }
+      } catch (err) {
+        alert('Lỗi: ' + err);
+      } finally {
+        setMovingId(null);
+      }
+    }
+  };
+
   // Delete media item
   const handleDeleteItem = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -118,24 +151,30 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({
   });
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6 space-y-6">
-      {/* Top Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-zinc-100 flex items-center gap-2.5">
-            <span>Thư viện Media</span>
-            <span className="text-xs px-2.5 py-0.5 rounded-full bg-zinc-800 text-zinc-400 font-normal">
+    <div className="max-w-6xl mx-auto px-4 py-4 space-y-6">
+      {/* Top Banner - visionOS Spatial Frosted Glass */}
+      <div className="p-6 rounded-3xl vision-glass flex flex-col md:flex-row md:items-center justify-between gap-5 relative overflow-hidden">
+        {/* Subtle background ambient glow */}
+        <div className="absolute -right-16 -top-16 w-52 h-52 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -left-16 -bottom-16 w-52 h-52 bg-sky-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10">
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl font-bold text-white tracking-wide">
+              Thư viện Media
+            </h1>
+            <span className="text-xs px-2.5 py-0.5 rounded-full vision-glass text-emerald-300 font-semibold border-emerald-500/30">
               {items.length} mục
             </span>
-          </h1>
-          <p className="text-sm text-zinc-400 mt-1">
-            Trình phát video & audio cá nhân siêu mượt, hỗ trợ cử chỉ và tăng âm lượng 200%
+          </div>
+          <p className="text-xs text-zinc-300 mt-1 max-w-lg font-light leading-relaxed">
+            Trình phát đa phương tiện thuần khiết theo ngôn ngữ Apple visionOS. Cử chỉ vuốt chạm chuẩn MX Player, khuếch đại âm lượng 200% và bảo mật két ẩn AES-256.
           </p>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex items-center gap-2.5">
-          <label className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs shadow-lg shadow-emerald-500/20 transition-all cursor-pointer">
+        {/* Action Buttons - visionOS Glass Capsules */}
+        <div className="flex items-center gap-2.5 relative z-10">
+          <label className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs shadow-lg shadow-emerald-500/25 transition-all cursor-pointer transform hover:scale-[1.02] active:scale-95">
             <FolderPlus className="w-4 h-4" />
             <span>Mở tệp Media</span>
             <input
@@ -149,18 +188,18 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({
 
           <button
             onClick={onOpenNetworkStream}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 font-semibold text-xs border border-zinc-700/80 transition-all cursor-pointer"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-full vision-btn-circle text-zinc-200 font-semibold text-xs transition-all cursor-pointer"
           >
-            <Globe className="w-4 h-4 text-emerald-400" />
-            <span>Mở Stream URL</span>
+            <Globe className="w-4 h-4 text-sky-400" />
+            <span>Stream URL</span>
           </button>
         </div>
       </div>
 
-      {/* Tabs & Search */}
+      {/* Tabs & Search - visionOS Floating Pill Navigation */}
       <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
-        {/* Tabs */}
-        <div className="flex items-center gap-1 p-1 bg-zinc-900 rounded-xl border border-zinc-800 self-start">
+        {/* Tabs Capsule */}
+        <div className="flex items-center gap-1 p-1 rounded-full vision-capsule self-start overflow-x-auto max-w-full">
           {[
             { id: 'all', label: 'Tất cả' },
             { id: 'video', label: 'Video', icon: Film },
@@ -171,39 +210,50 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                activeTab === tab.id ? 'bg-emerald-500 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'
+              className={`px-3.5 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === tab.id 
+                  ? 'bg-emerald-500 text-zinc-950 font-bold shadow-md shadow-emerald-500/20' 
+                  : 'text-zinc-400 hover:text-white'
               }`}
             >
               {tab.icon && <tab.icon className="w-3.5 h-3.5" />}
               <span>{tab.label}</span>
             </button>
           ))}
+
+          {/* Quick link to Vault */}
+          <button
+            onClick={onOpenVault}
+            className="px-3.5 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 text-zinc-400 hover:text-emerald-400 transition-all cursor-pointer whitespace-nowrap border-l border-white/10 pl-3 ml-1"
+          >
+            <Lock className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Két Bí Mật</span>
+          </button>
         </div>
 
-        {/* Search */}
+        {/* Search Input - visionOS Pill */}
         <div className="relative max-w-xs w-full">
           <input
             type="text"
-            placeholder="Tìm video, audio..."
+            placeholder="Tìm phim, video, bài hát..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full px-3 py-1.5 pl-8 rounded-xl bg-zinc-900 border border-zinc-800 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 transition-colors"
+            className="w-full px-3.5 py-2 pl-9 rounded-full vision-glass text-xs text-white placeholder-zinc-400 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/30 transition-all"
           />
-          <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
         </div>
       </div>
 
       {/* Grid of Media Items */}
       {filtered.length === 0 ? (
-        <div className="p-12 text-center rounded-3xl bg-zinc-900/50 border border-zinc-800/80 flex flex-col items-center gap-4">
-          <div className="p-4 rounded-full bg-zinc-800/80 text-zinc-500">
+        <div className="p-14 text-center rounded-3xl vision-glass flex flex-col items-center gap-4">
+          <div className="p-4 rounded-full vision-btn-circle text-zinc-500">
             <FileVideo className="w-10 h-10" />
           </div>
           <div>
             <h3 className="text-base font-bold text-zinc-200">Chưa có tệp media nào</h3>
             <p className="text-xs text-zinc-400 max-w-sm mt-1">
-              Bấm nút "Mở tệp Media" để chọn phim ảnh từ máy tính hoặc "Mở Stream URL" để xem luồng trực tiếp.
+              Bấm nút "Mở tệp Media" để chọn phim từ bộ nhớ hoặc mở đường link trực tiếp Stream URL.
             </p>
           </div>
         </div>
@@ -213,41 +263,54 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({
             <div
               key={item.id}
               onClick={() => onPlayMedia(item)}
-              className="group p-4 rounded-2xl bg-zinc-900/80 hover:bg-zinc-800/70 border border-zinc-800 hover:border-emerald-500/40 shadow-lg hover:shadow-emerald-500/5 transition-all cursor-pointer flex flex-col justify-between gap-3 relative overflow-hidden"
+              className="vision-card p-4.5 flex flex-col justify-between gap-3 relative cursor-pointer group"
             >
-              {/* Media Card Header */}
+              {/* Media Card Top Header */}
               <div className="flex items-start justify-between gap-3">
-                <div className="p-2.5 rounded-xl bg-zinc-800/90 text-emerald-400 border border-zinc-700/60 group-hover:bg-emerald-500 group-hover:text-zinc-950 transition-colors">
+                <div className="p-2.5 rounded-2xl vision-capsule text-emerald-400 border border-emerald-500/30 group-hover:scale-105 transition-transform shadow-md shadow-emerald-500/10">
                   {item.type === 'video' ? <Film className="w-5 h-5" /> : item.type === 'audio' ? <Music className="w-5 h-5" /> : <Globe className="w-5 h-5" />}
                 </div>
 
                 <div className="flex items-center gap-1">
+                  {/* Move to Vault Button */}
+                  <button
+                    onClick={(e) => handleMoveToVault(item, e)}
+                    disabled={movingId === item.id}
+                    className="p-1.5 rounded-xl vision-btn-circle text-zinc-400 hover:text-emerald-400 transition-colors cursor-pointer"
+                    title="Ẩn vào Két bí mật (Mã hóa AES-256)"
+                  >
+                    <Lock className={`w-3.5 h-3.5 ${movingId === item.id ? 'animate-spin' : ''}`} />
+                  </button>
+
+                  {/* Favorite Button */}
                   <button
                     onClick={(e) => handleToggleFavorite(item, e)}
-                    className={`p-1.5 rounded-lg hover:bg-zinc-800 transition-colors cursor-pointer ${
-                      item.isFavorite ? 'text-red-400' : 'text-zinc-500 hover:text-zinc-300'
+                    className={`p-1.5 rounded-xl vision-btn-circle transition-colors cursor-pointer ${
+                      item.isFavorite ? 'text-rose-400' : 'text-zinc-400 hover:text-white'
                     }`}
                     title={item.isFavorite ? 'Bỏ yêu thích' : 'Yêu thích'}
                   >
-                    <Heart className={`w-4 h-4 ${item.isFavorite ? 'fill-current' : ''}`} />
+                    <Heart className={`w-3.5 h-3.5 ${item.isFavorite ? 'fill-current' : ''}`} />
                   </button>
+
+                  {/* Delete Button */}
                   <button
                     onClick={(e) => handleDeleteItem(item.id, e)}
-                    className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-zinc-800 transition-colors cursor-pointer"
+                    className="p-1.5 rounded-xl vision-btn-circle text-zinc-400 hover:text-rose-400 transition-colors cursor-pointer"
                     title="Xóa mục"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
 
               {/* Title & Info */}
               <div>
-                <h3 className="text-sm font-bold text-zinc-100 line-clamp-2 group-hover:text-emerald-400 transition-colors">
+                <h3 className="text-sm font-bold text-white line-clamp-2 group-hover:text-emerald-300 transition-colors">
                   {item.title}
                 </h3>
                 <div className="flex items-center gap-2 mt-2 text-[11px] text-zinc-400 font-mono">
-                  <span className="uppercase px-1.5 py-0.5 rounded bg-zinc-800 font-bold text-emerald-400 font-sans text-[10px]">
+                  <span className="uppercase px-1.5 py-0.5 rounded-md vision-glass font-bold text-emerald-400 font-sans text-[10px]">
                     {item.format || item.type}
                   </span>
                   {item.duration > 0 && (
@@ -272,14 +335,25 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({
                     <span>Đã xem {item.progressPercent}%</span>
                     <span>{formatDuration(item.currentTime)}</span>
                   </div>
-                  <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden">
+                  <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
                     <div 
-                      className="h-full bg-emerald-500 rounded-full"
+                      className="h-full bg-emerald-400 rounded-full shadow-[0_0_8px_rgba(52,211,153,0.8)]"
                       style={{ width: `${item.progressPercent}%` }}
                     />
                   </div>
                 </div>
               )}
+
+              {/* Play Hint */}
+              <div className="pt-2 flex items-center justify-between border-t border-white/5 text-[11px] text-zinc-400">
+                <span className="flex items-center gap-1 text-emerald-400 font-medium group-hover:translate-x-1 transition-transform">
+                  <Play className="w-3 h-3 fill-current" />
+                  <span>Phát ngay</span>
+                </span>
+                <span className="text-[10px] text-zinc-500 font-mono">
+                  {new Date(item.lastPlayedAt).toLocaleDateString()}
+                </span>
+              </div>
             </div>
           ))}
         </div>

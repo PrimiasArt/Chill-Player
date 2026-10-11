@@ -74,24 +74,24 @@ export const NetworkStreamModal: React.FC<NetworkStreamModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xl animate-in fade-in duration-200">
       <div 
-        className="w-full max-w-lg rounded-2xl bg-zinc-900 border border-zinc-700/80 shadow-2xl overflow-hidden flex flex-col"
+        className="w-full max-w-lg rounded-3xl vision-glass border border-white/20 shadow-[0_30px_70px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-          <div className="flex items-center gap-2.5 text-zinc-100 font-bold text-base">
-            <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+        <div className="flex items-center justify-between px-6 py-4.5 border-b border-white/10">
+          <div className="flex items-center gap-3 text-white font-bold text-base">
+            <div className="w-9 h-9 rounded-2xl vision-capsule flex items-center justify-center text-sky-400 border border-sky-400/30">
               <Globe className="w-5 h-5" />
             </div>
-            <span>Mở Luồng Trực Tuyến (Network Stream)</span>
+            <span>Mở Luồng Trực Tuyến</span>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors cursor-pointer"
+            className="w-8 h-8 rounded-full vision-btn-circle text-zinc-400 hover:text-white flex items-center justify-center cursor-pointer"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
@@ -99,7 +99,7 @@ export const NetworkStreamModal: React.FC<NetworkStreamModalProps> = ({
         <div className="p-6 space-y-4">
           <div>
             <label className="text-xs font-semibold text-zinc-300 block mb-1.5">
-              Đường dẫn Video / Audio (HLS .m3u8, MP4, WebM, MKV...):
+              Đường dẫn Media (HLS .m3u8, MP4, WebM, MKV...):
             </label>
             <div className="relative">
               <input
@@ -110,7 +110,7 @@ export const NetworkStreamModal: React.FC<NetworkStreamModalProps> = ({
                   setStreamUrl(e.target.value);
                   setError(null);
                 }}
-                className="w-full px-3.5 py-2.5 pl-9 rounded-xl bg-zinc-950 border border-zinc-700 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 transition-colors"
+                className="w-full px-3.5 py-2.5 pl-9 rounded-2xl vision-glass text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500/60 transition-colors"
               />
               <Link2 className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
             </div>
@@ -125,12 +125,12 @@ export const NetworkStreamModal: React.FC<NetworkStreamModalProps> = ({
               placeholder="VD: Kênh phim tài liệu, Nhạc Lo-fi trực tiếp..."
               value={streamTitle}
               onChange={(e) => setStreamTitle(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-950 border border-zinc-700 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 transition-colors"
+              className="w-full px-3.5 py-2.5 rounded-2xl vision-glass text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500/60 transition-colors"
             />
           </div>
 
           {error && (
-            <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs flex items-center gap-2">
+            <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{error}</span>
             </div>
@@ -146,13 +146,13 @@ export const NetworkStreamModal: React.FC<NetworkStreamModalProps> = ({
                 <button
                   key={idx}
                   onClick={() => handleStartPlay(s.url, s.title)}
-                  className="w-full p-2.5 rounded-xl bg-zinc-950 hover:bg-zinc-800/80 border border-zinc-800 hover:border-zinc-700 text-left flex items-center justify-between text-xs text-zinc-300 hover:text-white transition-all cursor-pointer group"
+                  className="w-full p-2.5 rounded-2xl vision-glass hover:bg-white/10 border border-white/10 text-left flex items-center justify-between text-xs text-zinc-300 hover:text-white transition-all cursor-pointer group"
                 >
                   <div className="flex items-center gap-2 min-w-0 pr-2">
                     <Sparkles className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                     <span className="truncate">{s.title}</span>
                   </div>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 uppercase font-mono group-hover:bg-emerald-500 group-hover:text-zinc-950 font-bold transition-colors">
+                  <span className="text-[10px] px-2 py-0.5 rounded-full vision-glass text-emerald-300 uppercase font-mono group-hover:bg-emerald-500 group-hover:text-zinc-950 font-bold transition-colors">
                     {s.format}
                   </span>
                 </button>
@@ -162,16 +162,16 @@ export const NetworkStreamModal: React.FC<NetworkStreamModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 bg-zinc-950 border-t border-zinc-800 flex items-center justify-end gap-3">
+        <div className="px-6 py-4 border-t border-white/10 flex items-center justify-end gap-3">
           <button
             onClick={onClose}
-            className="px-4 py-2 rounded-xl text-xs font-semibold text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
+            className="px-4 py-2 rounded-full text-xs font-semibold text-zinc-400 hover:text-white transition-colors cursor-pointer"
           >
             Hủy
           </button>
           <button
             onClick={() => handleStartPlay(streamUrl, streamTitle)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs shadow-lg shadow-emerald-500/20 transition-all cursor-pointer"
+            className="flex items-center gap-1.5 px-5 py-2.5 rounded-full bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs shadow-lg shadow-emerald-500/20 transition-all cursor-pointer transform hover:scale-105"
           >
             <Play className="w-4 h-4 fill-current" />
             <span>Phát Ngay</span>
