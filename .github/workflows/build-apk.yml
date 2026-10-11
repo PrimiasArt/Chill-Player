@@ -72,43 +72,56 @@ jobs:
         run: |
           RUN_NUM="${{ github.run_number }}"
           APK_SRC="android/app/build/outputs/apk/debug/app-debug.apk"
-          cp "$APK_SRC" ChillPlayer-v1.0.apk
-          cp "$APK_SRC" "ChillPlayer-v1.0.${RUN_NUM}.apk"
           cp "$APK_SRC" ChillReader-v1.0.apk
+          cp "$APK_SRC" "ChillReader-v1.0.${RUN_NUM}.apk"
 
       - name: Upload APK as Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ChillPlayer-v1.0.${{ github.run_number }}-APK
+          name: ChillReader-v1.0.${{ github.run_number }}-APK
           path: |
-            ChillPlayer-v1.0.apk
-            ChillPlayer-v1.0.${{ github.run_number }}.apk
+            ChillReader-v1.0.apk
+            ChillReader-v1.0.${{ github.run_number }}.apk
             version.json
           retention-days: 30
 
-      - name: Create or Update GitHub Release
+      - name: Create GitHub Release for New Version
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Chill Reader APK v1.0.${{ github.run_number }} (Mới nhất)
+          make_latest: true
+          body: |
+            ## 📱 Bản cài đặt Android APK (Chill Reader - v1.0.${{ github.run_number }})
+            - **Phiên bản:** `1.0.${{ github.run_number }}` (VersionCode: ${{ 100 + github.run_number }})
+            - **Chữ ký cố định (Persistent Keystore):** Cài đè trực tiếp mà không cần gỡ bản cũ, giữ nguyên 100% dữ liệu sách offline và cài đặt đồng bộ Supabase Cloud.
+            - **Tính năng & Sửa lỗi:**
+              - 🛠️ **Sửa triệt để lỗi màn hình xám khi bấm Cài đặt (Settings):** Khởi tạo dữ liệu an toàn.
+              - 🔙 **Xử lý nút Quay lại (Back Button):** Thoát modal -> thoát đọc về tủ sách -> nhấn 2 lần để thoát app.
+              - 🔄 **Tự động cập nhật trực tiếp (In-App Auto Update):** Thông báo và cài đặt bản mới 1 chạm.
+              - 🎧 **Native Android TTS 100% Offline:** Đọc giọng máy không cần mạng Internet.
+
+            👉 Tải file **`ChillReader-v1.0.apk`** hoặc **`ChillReader-v1.0.${{ github.run_number }}.apk`** bên dưới để cài đặt trực tiếp vào điện thoại Android.
+          files: |
+            ChillReader-v1.0.apk
+            ChillReader-v1.0.${{ github.run_number }}.apk
+            version.json
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update latest tag release
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
           tag_name: android-apk-latest
-          name: Chill Player Android APK v1.0.${{ github.run_number }} (Mới nhất)
-          body: |
-            ## 📱 Bản cài đặt Android APK (Chill Player - Tự động tăng phiên bản)
-            - **Phiên bản:** `1.0.${{ github.run_number }}` (VersionCode: `${{ github.run_number }}` + 100)
-            - **Chữ ký cố định (Persistent Keystore):** Cài đè trực tiếp mà không cần gỡ bản cũ, giữ nguyên 100% dữ liệu sách offline và cài đặt đồng bộ Supabase Cloud.
-            - **Tính năng nổi bật:**
-              - 🎧 **Nghe truyện Audio TTS Tiếng Việt:** Đọc không quảng cáo, nhận diện giọng đọc chuẩn mực (Edge AI Neural, Google, Android Offline Native).
-              - 📖 **Trải nghiệm đọc mượt mà:** Chế độ lật trang (Paged) & cuộn liên tục, chỉnh phông chữ, cỡ chữ, dãn dòng, theme Đen Amoled, Vàng Sepia, Ban đêm.
-              - 📥 **Nạp file & Tự động phân chương:** Đọc file TXT, EPUB, PDF trực tiếp hoặc cào truyện online.
-              - 🔄 **Tự động cập nhật 1 chạm (In-app Updater):** Ứng dụng tự động thông báo và tải bản mới nhất khi có build mới trên GitHub.
-
-            👉 Tải file **`ChillPlayer-v1.0.apk`** bên dưới để cài đặt vào điện thoại Android.
+          name: Chill Reader Android APK (Mới nhất)
+          make_latest: false
           files: |
-            ChillPlayer-v1.0.apk
-            ChillPlayer-v1.0.${{ github.run_number }}.apk
             ChillReader-v1.0.apk
+            ChillReader-v1.0.${{ github.run_number }}.apk
             version.json
-          draft: false
-          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
