@@ -33,6 +33,25 @@ jobs:
       - name: Install Node Dependencies
         run: npm install
 
+      - name: Generate version.json before Web Build
+        run: |
+          RUN_NUM="${{ github.run_number }}"
+          VERSION_CODE=$((100 + RUN_NUM))
+          VERSION_NAME="1.0.${RUN_NUM}"
+          BUILD_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          mkdir -p public
+          cat << EOF > public/version.json
+          {
+            "versionName": "${VERSION_NAME}",
+            "versionCode": ${VERSION_CODE},
+            "buildTime": "${BUILD_TIME}",
+            "downloadUrl": "https://github.com/PrimiasArt/Chill-reader/releases/download/android-apk-latest/ChillReader-v1.0.apk",
+            "commit": "${{ github.sha }}",
+            "releaseNotes": "Bản cập nhật tự động mới nhất qua GitHub Actions"
+          }
+          EOF
+          cp public/version.json version.json
+
       - name: Build Web App (Vite)
         run: npm run build
 
@@ -79,7 +98,9 @@ jobs:
               - 📜 **Sổ tay nhân vật & Cảnh giới tu tiên:** Ghi nhớ nhân vật, quan hệ, cấp độ tu luyện và pháp bảo.
 
             👉 Tải file **`ChillReader-v1.0.apk`** bên dưới và cài đặt trực tiếp vào điện thoại Android.
-          files: ChillReader-v1.0.apk
+          files: |
+            ChillReader-v1.0.apk
+            version.json
           draft: false
           prerelease: false
         env:

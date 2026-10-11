@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { Sparkles } from 'lucide-react';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
 import { LibraryView } from './components/LibraryView';
@@ -7,9 +8,11 @@ import { CrawlView } from './components/CrawlView';
 import { ReaderView } from './components/ReaderView';
 import { TTSPlayerBar } from './components/TTSPlayerBar';
 import { SettingsView } from './components/SettingsView';
+import { UpdateModal } from './components/UpdateModal';
 import { db, DEFAULT_READER_SETTINGS, DEFAULT_TTS_SETTINGS } from './services/db';
 import { ttsEngine, type TTSState } from './services/tts/ttsEngine';
 import { supabaseSync } from './services/sync/supabaseSync';
+import { appUpdater } from './services/appUpdater';
 import { INITIAL_SAMPLE_STORY } from './services/sampleData';
 import type { Story, Chapter, ReaderSettings, TTSSettings } from './types';
 
@@ -22,6 +25,8 @@ export const App: React.FC = () => {
   const [currentChapterNumber, setCurrentChapterNumber] = useState<number>(1);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isFullTTSModalOpen, setIsFullTTSModalOpen] = useState(false);
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+  const [updateNotification, setUpdateNotification] = useState<string | null>(null);
 
   // Data
   const [stories, setStories] = useState<Story[]>([]);
@@ -77,6 +82,19 @@ export const App: React.FC = () => {
       unsubSync();
     };
   }, [loadLibrary]);
+
+  // Check for App updates in background
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      appUpdater.checkForUpdates(false).then((res) => {
+        if (res.hasUpdate && res.latestVersion) {
+          setUpdateNotification(res.latestVersion.versionName);
+        }
+      }).catch(() => {});
+    }, 2500);
+
+    return () => clearTimeout(timer);
+  }, []);
 
   // Hook up TTS Engine Listeners
   useEffect(() => {
@@ -396,6 +414,31 @@ export const App: React.FC = () => {
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
         onImportComplete={handleImportComplete}
+      />
+
+      {/* Floating Update Notification Pill */}
+      {updateNotification && (
+        <div 
+          onClick={() => {
+            setIsUpdateModalOpen(true);
+            setUpdateNotification(null);
+          }}
+          className="fixed top-3 left-4 right-4 sm:left-auto sm:right-6 sm:w-auto z-50 bg-gradient-to-r from-amber-500 to-amber-400 text-zinc-950 px-4 py-2.5 rounded-2xl font-bold text-xs shadow-2xl shadow-amber-500/25 flex items-center justify-between gap-3 cursor-pointer hover:brightness-105 active:scale-98 transition-all animate-in slide-in-from-top-4 border border-amber-300/40"
+        >
+          <div className="flex items-center gap-2 truncate">
+            <Sparkles className="w-4 h-4 shrink-0 fill-current text-zinc-950" />
+            <span className="truncate">Đã có bản cập nhật mới {updateNotification}!</span>
+          </div>
+          <span className="px-2.5 py-1 bg-zinc-950 text-amber-400 rounded-xl text-[10px] uppercase font-bold shrink-0 shadow-sm">
+            Nâng cấp
+          </span>
+        </div>
+      )}
+
+      {/* In-App Auto Update Modal */}
+      <UpdateModal
+        isOpen={isUpdateModalOpen}
+        onClose={() => setIsUpdateModalOpen(false)}
       />
     </div>
   );

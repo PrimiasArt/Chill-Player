@@ -29,6 +29,8 @@ import { supabaseSync, type SupabaseConfig } from '../services/sync/supabaseSync
 import { ttsEngine, type VoiceOption } from '../services/tts/ttsEngine';
 import { pronunciationService, type PronunciationRule } from '../services/tts/pronunciation';
 import { ambientAudioService, AMBIENT_SOUND_OPTIONS, type AmbientSoundType } from '../services/tts/ambientAudio';
+import { appUpdater, type UpdateState } from '../services/appUpdater';
+import { UpdateModal } from './UpdateModal';
 import type { ReaderSettings, TTSSettings } from '../types';
 
 interface SettingsViewProps {
@@ -80,6 +82,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [ambientVol, setAmbientVol] = useState<number>(ambientAudioService.getVolume());
   const [clearedAudioMsg, setClearedAudioMsg] = useState<string | null>(null);
 
+  // In-App Auto Update state
+  const [updateState, setUpdateState] = useState<UpdateState>(appUpdater.getCurrentVersion() as any);
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+  const [updateCheckMsg, setUpdateCheckMsg] = useState<string | null>(null);
+
   useEffect(() => {
     supabaseSync.init().then(() => {
       setCloudConfig(supabaseSync.getConfig());
@@ -95,7 +102,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         setVoices(ttsEngine.getAllAvailableVoices());
       };
     }
+
+    const unsubUpdater = appUpdater.subscribe((st) => {
+      setUpdateState({ ...st });
+    });
+
+    return () => {
+      unsubUpdater();
+    };
   }, []);
+
+  const handleCheckUpdate = async () => {
+    setUpdateCheckMsg(null);
+    const res = await appUpdater.checkForUpdates(true);
+    if (res.hasUpdate) {
+      setIsUpdateModalOpen(true);
+    } else if (res.error) {
+      setUpdateCheckMsg(res.error);
+    } else {
+      setUpdateCheckMsg(`Bạn đang dùng phiên bản mới nhất (${res.currentVersion.versionName})!`);
+      setTimeout(() => setUpdateCheckMsg(null), 4000);
+    }
+  };
 
   const handleAddRule = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1067,7 +1095,89 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
         </div>
       </div>
 
-      {/* 7. DATA RESET */}
+      {/* 7. APP UPDATES (AUTO UPDATE & CHECK FOR UPDATES) */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0">
+              <Sparkles className="w-5 h-5 text-amber-400" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-semibold text-sm text-zinc-100">Cập nhật ứng dụng</h3>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 font-mono border border-zinc-700">
+                  {updateState.currentVersion.versionName}
+                </span>
+                {updateState.updateAvailable?.hasUpdate && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-zinc-950 font-bold animate-pulse">
+                    Có bản mới {updateState.updateAvailable.latestVersion?.versionName}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                Kiểm tra và tự động nâng cấp ứng dụng Chill Reader trực tiếp không cần gỡ bản cũ
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Status message */}
+        {updateCheckMsg && (
+          <div className="text-xs p-3 rounded-xl bg-zinc-800/80 border border-zinc-700/60 flex items-center gap-2 text-zinc-200">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{updateCheckMsg}</span>
+          </div>
+        )}
+
+        {/* Action Buttons */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {updateState.updateAvailable?.hasUpdate ? (
+            <button
+              type="button"
+              onClick={() => setIsUpdateModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-98 text-zinc-950 text-xs font-bold transition-all shadow-md shadow-amber-500/20 cursor-pointer"
+            >
+              <Download className="w-4 h-4" />
+              <span>Cập nhật ngay ({updateState.updateAvailable.latestVersion?.versionName})</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={updateState.isChecking}
+              onClick={handleCheckUpdate}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 active:scale-98 text-zinc-200 text-xs font-semibold border border-zinc-700 transition-all cursor-pointer disabled:opacity-50"
+            >
+              {updateState.isChecking ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                  <span>Đang kiểm tra...</span>
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Kiểm tra cập nhật</span>
+                </>
+              )}
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => {
+              const url = updateState.updateAvailable?.latestVersion?.downloadUrl || 
+                'https://github.com/PrimiasArt/Chill-reader/releases/download/android-apk-latest/ChillReader-v1.0.apk';
+              window.open(url, '_blank');
+            }}
+            className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-zinc-800/60 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 text-xs font-medium border border-zinc-800 transition-colors cursor-pointer"
+            title="Tải tệp APK trực tiếp từ trình duyệt"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Tải file APK trực tiếp</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 8. DATA RESET */}
       <div className="space-y-3">
         {/* Offline Audio Cache Reset */}
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 flex items-center justify-between">
@@ -1115,8 +1225,14 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
           </span>
         </div>
         <p className="font-medium text-zinc-400">Ứng dụng đọc truyện chữ & nghe audio cá nhân</p>
-        <p>Phiên bản 1.0 • Hoàn toàn riêng tư, không quảng cáo, đồng bộ Supabase Cloud đa nền tảng</p>
+        <p>Phiên bản {updateState.currentVersion.versionName} • Hoàn toàn riêng tư, không quảng cáo, đồng bộ Supabase Cloud đa nền tảng</p>
       </div>
+
+      {/* Update Modal */}
+      <UpdateModal 
+        isOpen={isUpdateModalOpen} 
+        onClose={() => setIsUpdateModalOpen(false)} 
+      />
     </div>
   );
 };
