@@ -78,6 +78,7 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({
         id: `local_${Date.now()}_${i}`,
         title: file.name.replace(/\.[^/.]+$/, ''),
         url,
+        fileBlob: file, // Persist blob data
         type: isVideo ? 'video' : 'audio',
         duration: 0,
         currentTime: 0,
@@ -104,15 +105,19 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({
       return;
     }
 
-    if (confirm(`Bạn muốn mã hóa và chuyển "${item.title}" vào Két bí mật? Tệp sẽ biến mất khỏi thư viện thông thường.`)) {
+    if (confirm(`Bạn muốn mã hóa và chuyển "${item.title}" vào Két bí mật? Tệp sẽ biến mất hoàn toàn khỏi Thư viện của ứng dụng.`)) {
       setMovingId(item.id);
       try {
         const ok = await vaultService.moveItemToVault(item);
         if (ok) {
           await onRefreshItems();
-          alert('Đã mã hóa và chuyển tệp vào Két thành công! 🔒');
+          alert(
+            `Đã chuyển "${item.title}" vào Két bí mật an toàn! 🔒\n\n` +
+            `• Media đã được mã hóa AES-256 và biến mất khỏi Thư viện app.\n` +
+            `• Để ẩn hoàn toàn khỏi thiết bị, bạn hãy xóa file gốc trong Bộ sưu tập của máy.`
+          );
         } else {
-          alert('Không thể chuyển tệp vào Két. Hãy chắc chắn tệp còn tồn tại.');
+          alert('Không thể chuyển tệp vào Két. Vui lòng kiểm tra lại.');
         }
       } catch (err) {
         alert('Lỗi: ' + err);
@@ -140,6 +145,9 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({
 
   // Filter items
   const filtered = items.filter(item => {
+    // Strictly isolate: NEVER show vault items in public library
+    if (item.id.startsWith('vault_')) return false;
+
     const matchSearch = item.title.toLowerCase().includes(searchQuery.toLowerCase());
     if (!matchSearch) return false;
 
@@ -262,7 +270,12 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({
           {filtered.map((item) => (
             <div
               key={item.id}
-              onClick={() => onPlayMedia(item)}
+              onClick={() => {
+                if (item.fileBlob) {
+                  item.url = URL.createObjectURL(item.fileBlob);
+                }
+                onPlayMedia(item);
+              }}
               className="vision-card p-4.5 flex flex-col justify-between gap-3 relative cursor-pointer group"
             >
               {/* Media Card Top Header */}

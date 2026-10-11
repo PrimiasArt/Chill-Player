@@ -44,6 +44,7 @@ export const VaultView: React.FC<VaultViewProps> = ({
   const [vaultItems, setVaultItems] = useState<VaultMediaItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [decryptingId, setDecryptingId] = useState<string | null>(null);
 
   const loadVaultItems = async () => {
     setIsLoading(true);
@@ -142,11 +143,14 @@ export const VaultView: React.FC<VaultViewProps> = ({
 
   // Play decrypted media
   const handlePlay = async (vaultItem: VaultMediaItem) => {
+    setDecryptingId(vaultItem.id);
     try {
       const mediaItem = await vaultService.getDecryptedMediaItem(vaultItem);
       onPlayVaultMedia(mediaItem);
     } catch (e) {
       alert('Không thể giải mã tệp này: ' + e);
+    } finally {
+      setDecryptingId(null);
     }
   };
 
@@ -426,9 +430,18 @@ export const VaultView: React.FC<VaultViewProps> = ({
 
               {/* Play Badge */}
               <div className="pt-2 flex items-center justify-between border-t border-white/5 text-[11px] text-zinc-400">
-                <span className="flex items-center gap-1 text-emerald-400 font-medium">
-                  <Play className="w-3 h-3 fill-current" />
-                  <span>Chạm để giải mã & phát</span>
+                <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
+                  {decryptingId === item.id ? (
+                    <>
+                      <div className="w-3 h-3 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
+                      <span className="text-emerald-300">Đang giải mã trong RAM...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-3 h-3 fill-current" />
+                      <span>Chạm để giải mã & phát</span>
+                    </>
+                  )}
                 </span>
                 <span className="text-[10px] px-2 py-0.5 rounded-full vision-glass text-zinc-400">
                   Mã hóa AES-256

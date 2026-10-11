@@ -6,6 +6,7 @@ export interface MediaItem {
   id: string;
   title: string;
   url: string;
+  fileBlob?: Blob; // Local file blob stored in IndexedDB for permanent access
   type: MediaType;
   duration: number; // in seconds
   currentTime: number; // in seconds

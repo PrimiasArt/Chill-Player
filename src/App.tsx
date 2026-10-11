@@ -21,6 +21,11 @@ export const App: React.FC = () => {
   // Load items from database
   const refreshItems = async () => {
     const list = await db.mediaItems.orderBy('lastPlayedAt').reverse().toArray();
+    list.forEach(item => {
+      if (item.fileBlob) {
+        item.url = URL.createObjectURL(item.fileBlob);
+      }
+    });
     setMediaItems(list);
   };
 

@@ -59,7 +59,7 @@ class VaultService {
     return bytes.buffer;
   }
 
-  // Derive AES-256-GCM key from PIN + Salt using PBKDF2
+  // Derive AES-256-GCM key from PIN + Salt using PBKDF2 (Optimized 25,000 iterations for instant mobile response)
   private async deriveKey(pin: string, salt: Uint8Array): Promise<CryptoKey> {
     const enc = new TextEncoder();
     const keyMaterial = await crypto.subtle.importKey(
@@ -74,7 +74,7 @@ class VaultService {
       {
         name: 'PBKDF2',
         salt: salt as BufferSource,
-        iterations: 100000,
+        iterations: 25000,
         hash: 'SHA-256'
       },
       keyMaterial,
@@ -189,9 +189,13 @@ class VaultService {
   async moveItemToVault(mediaItem: MediaItem): Promise<boolean> {
     if (!this.activeKey) throw new Error('Vault is locked');
     try {
-      // Fetch the media blob from its URL
-      const response = await fetch(mediaItem.url);
-      const blob = await response.blob();
+      let blob: Blob;
+      if (mediaItem.fileBlob) {
+        blob = mediaItem.fileBlob;
+      } else {
+        const response = await fetch(mediaItem.url);
+        blob = await response.blob();
+      }
 
       await this.encryptAndStoreFile(
         blob,
@@ -200,7 +204,7 @@ class VaultService {
         mediaItem.duration
       );
 
-      // Remove from normal public library
+      // Permanently remove from normal public library
       await db.mediaItems.delete(mediaItem.id);
       return true;
     } catch (e) {
@@ -258,7 +262,7 @@ class VaultService {
 
     return {
       id: vaultItem.id,
-      title: `🔒 ${vaultItem.title}`,
+      title: vaultItem.title,
       url: memoryUrl,
       type: vaultItem.type,
       duration: vaultItem.duration,
@@ -291,12 +295,25 @@ class VaultService {
   async restoreToLibrary(vaultItem: VaultMediaItem): Promise<boolean> {
     if (!this.activeKey) throw new Error('Vault is locked');
     try {
-      const media = await this.getDecryptedMediaItem(vaultItem);
-      // Create regular MediaItem
+      const iv = new Uint8Array(this.b642buf(vaultItem.iv));
+      const encryptedArrayBuffer = await vaultItem.encryptedBlob.arrayBuffer();
+      const decryptedBuffer = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: iv as BufferSource },
+        this.activeKey,
+        encryptedArrayBuffer
+      );
+      const mime = vaultItem.type === 'video' 
+        ? `video/${vaultItem.format === 'mkv' ? 'x-matroska' : vaultItem.format}` 
+        : `audio/${vaultItem.format}`;
+      const decryptedBlob = new Blob([decryptedBuffer], { type: mime });
+      const url = URL.createObjectURL(decryptedBlob);
+
+      // Create regular MediaItem with persisted fileBlob
       const restoredItem: MediaItem = {
         id: `local_${Date.now()}_restored`,
         title: vaultItem.title,
-        url: media.url,
+        url,
+        fileBlob: decryptedBlob,
         type: vaultItem.type,
         duration: vaultItem.duration,
         currentTime: 0,
