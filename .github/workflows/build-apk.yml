@@ -47,7 +47,7 @@ jobs:
             "buildTime": "${BUILD_TIME}",
             "downloadUrl": "https://github.com/PrimiasArt/Chill-reader/releases/download/android-apk-latest/ChillReader-v1.0.apk",
             "commit": "${{ github.sha }}",
-            "releaseNotes": "Bản cập nhật tự động mới nhất qua GitHub Actions"
+            "releaseNotes": "Bản cập nhật v${VERSION_NAME} tự động qua GitHub Actions"
           }
           EOF
           cp public/version.json version.json
@@ -62,19 +62,28 @@ jobs:
         run: npx cap sync android
 
       - name: Build Debug APK with Gradle
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
         run: |
           cd android
           ./gradlew assembleDebug --stacktrace
 
-      - name: Rename APK
+      - name: Prepare APK outputs
         run: |
-          cp android/app/build/outputs/apk/debug/app-debug.apk ChillReader-v1.0.apk
+          RUN_NUM="${{ github.run_number }}"
+          APK_SRC="android/app/build/outputs/apk/debug/app-debug.apk"
+          cp "$APK_SRC" ChillPlayer-v1.0.apk
+          cp "$APK_SRC" "ChillPlayer-v1.0.${RUN_NUM}.apk"
+          cp "$APK_SRC" ChillReader-v1.0.apk
 
       - name: Upload APK as Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ChillReader-v1.0-APK
-          path: ChillReader-v1.0.apk
+          name: ChillPlayer-v1.0.${{ github.run_number }}-APK
+          path: |
+            ChillPlayer-v1.0.apk
+            ChillPlayer-v1.0.${{ github.run_number }}.apk
+            version.json
           retention-days: 30
 
       - name: Create or Update GitHub Release
@@ -82,23 +91,21 @@ jobs:
         if: github.ref == 'refs/heads/main'
         with:
           tag_name: android-apk-latest
-          name: Chill Reader Android APK (Mới nhất)
+          name: Chill Player Android APK v1.0.${{ github.run_number }} (Mới nhất)
           body: |
-            ## 📱 Bản cài đặt Android APK (Chill Reader - Nâng cấp toàn diện)
-            - **Chữ ký cố định (Persistent Keystore):** Giải quyết triệt để lỗi xung đột cài đè APK! Cập nhật trực tiếp mà không cần gỡ bản cũ, giữ nguyên 100% dữ liệu và cài đặt Supabase.
-            - **Tính năng & Hiệu năng nâng cấp:**
-              - 📱 **Giao diện Player chống tràn màn hình:** Tối ưu kích thước linh hoạt, cuộn mượt mà trên mọi kích thước màn hình Android.
-              - ⚡ **Virtual Scrolling Mục lục:** Hiển thị mượt mà 3.000 - 10.000 chương đạt chuẩn 60 FPS, không còn giật lag DOM.
-              - 📖 **Chế độ Lật trang (Paged Mode - Kindle) & Cuộn liên tục:** Tự động lật trang theo giọng đọc Audio TTS.
-              - 🔄 **Tự động kiểm tra & cập nhật chương mới:** Nút cập nhật tức thì từ nguồn web online.
-              - 🌧️ **Âm thanh nền thư giãn (Ambient Audio):** Phối âm tiếng mưa rơi, củi lửa tí tách, gió rừng trúc, suối nước thiên nhiên cùng giọng đọc.
-              - 📳 **Lắc máy gia hạn hẹn giờ (Shake-to-Extend):** Lắc nhẹ điện thoại khi sắp hết giờ để nghe thêm 15 phút.
-              - 🗣️ **Từ điển phát âm tuỳ chỉnh (Pronunciation Dictionary):** Sửa từ viết tắt, từ ngọng (ko ➔ không, main ➔ nhân vật chính,...).
-              - 💾 **Tải Audio ngoại tuyến 1-click & Xuất file:** Tải trọn bộ audio cả chương để nghe offline, hỗ trợ xuất truyện ra định dạng EPUB & TXT.
-              - 📜 **Sổ tay nhân vật & Cảnh giới tu tiên:** Ghi nhớ nhân vật, quan hệ, cấp độ tu luyện và pháp bảo.
+            ## 📱 Bản cài đặt Android APK (Chill Player - Tự động tăng phiên bản)
+            - **Phiên bản:** `1.0.${{ github.run_number }}` (VersionCode: `${{ github.run_number }}` + 100)
+            - **Chữ ký cố định (Persistent Keystore):** Cài đè trực tiếp mà không cần gỡ bản cũ, giữ nguyên 100% dữ liệu sách offline và cài đặt đồng bộ Supabase Cloud.
+            - **Tính năng nổi bật:**
+              - 🎧 **Nghe truyện Audio TTS Tiếng Việt:** Đọc không quảng cáo, nhận diện giọng đọc chuẩn mực (Edge AI Neural, Google, Android Offline Native).
+              - 📖 **Trải nghiệm đọc mượt mà:** Chế độ lật trang (Paged) & cuộn liên tục, chỉnh phông chữ, cỡ chữ, dãn dòng, theme Đen Amoled, Vàng Sepia, Ban đêm.
+              - 📥 **Nạp file & Tự động phân chương:** Đọc file TXT, EPUB, PDF trực tiếp hoặc cào truyện online.
+              - 🔄 **Tự động cập nhật 1 chạm (In-app Updater):** Ứng dụng tự động thông báo và tải bản mới nhất khi có build mới trên GitHub.
 
-            👉 Tải file **`ChillReader-v1.0.apk`** bên dưới và cài đặt trực tiếp vào điện thoại Android.
+            👉 Tải file **`ChillPlayer-v1.0.apk`** bên dưới để cài đặt vào điện thoại Android.
           files: |
+            ChillPlayer-v1.0.apk
+            ChillPlayer-v1.0.${{ github.run_number }}.apk
             ChillReader-v1.0.apk
             version.json
           draft: false

@@ -96,6 +96,54 @@ export const App: React.FC = () => {
     return () => clearTimeout(timer);
   }, []);
 
+  // Android Hardware / Gesture Back Button Handler
+  useEffect(() => {
+    (window as any).handleAndroidBack = (): boolean => {
+      // 1. If Update Modal is open, close it
+      if (isUpdateModalOpen) {
+        setIsUpdateModalOpen(false);
+        return true;
+      }
+
+      // 2. If Import Modal is open, close it
+      if (isImportModalOpen) {
+        setIsImportModalOpen(false);
+        return true;
+      }
+
+      // 3. If Fullscreen Audio Player Modal is open, close it (audio continues in mini player)
+      if (isFullTTSModalOpen) {
+        setIsFullTTSModalOpen(false);
+        return true;
+      }
+
+      // 4. If reading a story, return to Library
+      if (activeStory) {
+        setActiveStory(null);
+        return true;
+      }
+
+      // 5. If in Settings or Crawler, return to Library
+      if (currentTab !== 'library') {
+        setCurrentTab('library');
+        return true;
+      }
+
+      // 6. At root of app -> let Android show exit prompt
+      return false;
+    };
+
+    return () => {
+      delete (window as any).handleAndroidBack;
+    };
+  }, [
+    isUpdateModalOpen,
+    isImportModalOpen,
+    isFullTTSModalOpen,
+    activeStory,
+    currentTab
+  ]);
+
   // Hook up TTS Engine Listeners
   useEffect(() => {
     const unsubscribe = ttsEngine.addListener({

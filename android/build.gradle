@@ -24,6 +24,21 @@ allprojects {
     }
 }
 
+subprojects {
+    afterEvaluate { project ->
+        if (project.hasProperty("android")) {
+            def currentJavaVersion = JavaVersion.current()
+            def targetJava = currentJavaVersion.isCompatibleWith(JavaVersion.VERSION_21) ? JavaVersion.VERSION_21 : JavaVersion.VERSION_17
+            project.android {
+                compileOptions {
+                    sourceCompatibility = targetJava
+                    targetCompatibility = targetJava
+                }
+            }
+        }
+    }
+}
+
 task clean(type: Delete) {
     delete rootProject.buildDir
 }

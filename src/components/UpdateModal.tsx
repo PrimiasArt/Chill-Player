@@ -16,7 +16,7 @@ interface UpdateModalProps {
 }
 
 export const UpdateModal: React.FC<UpdateModalProps> = ({ isOpen, onClose }) => {
-  const [state, setState] = useState<UpdateState>(appUpdater.getCurrentVersion() as any);
+  const [state, setState] = useState<UpdateState>(() => appUpdater.getState());
 
   useEffect(() => {
     return appUpdater.subscribe((newState) => {
@@ -24,13 +24,13 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ isOpen, onClose }) => 
     });
   }, []);
 
-  if (!isOpen && !state.updateAvailable?.hasUpdate && !state.isDownloading) {
+  if (!isOpen && !state?.updateAvailable?.hasUpdate && !state?.isDownloading) {
     return null;
   }
 
-  const update = state.updateAvailable?.latestVersion;
-  const current = state.currentVersion;
-  const progress = state.progress;
+  const update = state?.updateAvailable?.latestVersion;
+  const current = state?.currentVersion || { versionName: '1.0', versionCode: 100 };
+  const progress = state?.progress;
 
   const formatBytes = (bytes?: number) => {
     if (!bytes || bytes <= 0) return '';

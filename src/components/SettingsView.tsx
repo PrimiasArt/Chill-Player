@@ -83,7 +83,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [clearedAudioMsg, setClearedAudioMsg] = useState<string | null>(null);
 
   // In-App Auto Update state
-  const [updateState, setUpdateState] = useState<UpdateState>(appUpdater.getCurrentVersion() as any);
+  const [updateState, setUpdateState] = useState<UpdateState>(() => appUpdater.getState());
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
   const [updateCheckMsg, setUpdateCheckMsg] = useState<string | null>(null);
 
@@ -1106,9 +1106,9 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-semibold text-sm text-zinc-100">Cập nhật ứng dụng</h3>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 font-mono border border-zinc-700">
-                  {updateState.currentVersion.versionName}
+                  {updateState?.currentVersion?.versionName || '1.0'}
                 </span>
-                {updateState.updateAvailable?.hasUpdate && (
+                {updateState?.updateAvailable?.hasUpdate && (
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-zinc-950 font-bold animate-pulse">
                     Có bản mới {updateState.updateAvailable.latestVersion?.versionName}
                   </span>
@@ -1225,7 +1225,7 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
           </span>
         </div>
         <p className="font-medium text-zinc-400">Ứng dụng đọc truyện chữ & nghe audio cá nhân</p>
-        <p>Phiên bản {updateState.currentVersion.versionName} • Hoàn toàn riêng tư, không quảng cáo, đồng bộ Supabase Cloud đa nền tảng</p>
+        <p>Phiên bản {updateState?.currentVersion?.versionName || '1.0'} • Hoàn toàn riêng tư, không quảng cáo, đồng bộ Supabase Cloud đa nền tảng</p>
       </div>
 
       {/* Update Modal */}

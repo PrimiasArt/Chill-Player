@@ -23,6 +23,7 @@ import android.util.Base64;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.widget.Toast;
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.FileProvider;
 import androidx.media.app.NotificationCompat.MediaStyle;
@@ -681,6 +682,32 @@ public class MainActivity extends BridgeActivity {
         int newWidth = Math.max(1, Math.round(ratio * width));
         int newHeight = Math.max(1, Math.round(ratio * height));
         return Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true);
+    }
+
+    private long lastBackPressTime = 0;
+
+    @Override
+    public void onBackPressed() {
+        WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+        if (webView != null) {
+            webView.evaluateJavascript("window.handleAndroidBack ? window.handleAndroidBack() : false", value -> {
+                String cleanVal = value != null ? value.replace("\"", "").trim() : "false";
+                if ("true".equalsIgnoreCase(cleanVal) || "handled".equalsIgnoreCase(cleanVal)) {
+                    // Handled internally in web app (returned to library, closed modal, etc.)
+                    return;
+                }
+
+                long currentTime = System.currentTimeMillis();
+                if (currentTime - lastBackPressTime < 2000) {
+                    finish();
+                } else {
+                    lastBackPressTime = currentTime;
+                    Toast.makeText(MainActivity.this, "Nhấn quay lại lần nữa để thoát", Toast.LENGTH_SHORT).show();
+                }
+            });
+            return;
+        }
+        super.onBackPressed();
     }
 
     @Override

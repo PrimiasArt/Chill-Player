@@ -110,6 +110,10 @@ class AppUpdaterService {
     return this.state.currentVersion;
   }
 
+  public getState(): UpdateState {
+    return this.state;
+  }
+
   public getCurrentVersion() {
     return this.state.currentVersion;
   }

@@ -7,9 +7,25 @@ android {
         applicationId "com.chillreader.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        def runNum = (System.getenv('GITHUB_RUN_NUMBER') ?: '10').toInteger()
-        versionCode 100 + runNum
-        versionName "1.0." + runNum
+        def runNumEnv = System.getenv('GITHUB_RUN_NUMBER')
+        def vCode = 110
+        def vName = "1.0.10"
+        if (runNumEnv) {
+            def runNum = runNumEnv.toInteger()
+            vCode = 100 + runNum
+            vName = "1.0." + runNum
+        } else {
+            try {
+                def versionFile = file('../../public/version.json')
+                if (versionFile.exists()) {
+                    def parsed = new groovy.json.JsonSlurper().parseText(versionFile.text)
+                    if (parsed.versionCode) vCode = parsed.versionCode.toInteger()
+                    if (parsed.versionName) vName = parsed.versionName.toString()
+                }
+            } catch (Exception ignored) {}
+        }
+        versionCode vCode
+        versionName vName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
