@@ -1,0 +1,130 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Chill Player APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'gradle'
+
+      - name: Install Node Dependencies
+        run: npm install
+
+      - name: Generate version.json before Web Build
+        run: |
+          RUN_NUM="${{ github.run_number }}"
+          VERSION_CODE=$((100 + RUN_NUM))
+          VERSION_NAME="1.0.${RUN_NUM}"
+          BUILD_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          mkdir -p public
+          cat << EOF > public/version.json
+          {
+            "versionName": "${VERSION_NAME}",
+            "versionCode": ${VERSION_CODE},
+            "buildTime": "${BUILD_TIME}",
+            "downloadUrl": "https://github.com/PrimiasArt/Chill-Player/releases/download/android-apk-latest/ChillPlayer-v1.0.apk",
+            "commit": "${{ github.sha }}",
+            "releaseNotes": "Bản phát hành Chill Player v${VERSION_NAME} tự động qua GitHub Actions"
+          }
+          EOF
+          cp public/version.json version.json
+
+      - name: Build Web App (Vite)
+        run: npm run build
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      - name: Sync Capacitor Android
+        run: npx cap sync android
+
+      - name: Build Debug APK with Gradle
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          cd android
+          ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Prepare APK outputs
+        run: |
+          RUN_NUM="${{ github.run_number }}"
+          APK_SRC="android/app/build/outputs/apk/debug/app-debug.apk"
+          cp "$APK_SRC" ChillPlayer-v1.0.apk
+          cp "$APK_SRC" "ChillPlayer-v1.0.${RUN_NUM}.apk"
+
+      - name: Upload APK as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChillPlayer-v1.0.${{ github.run_number }}-APK
+          path: |
+            ChillPlayer-v1.0.apk
+            ChillPlayer-v1.0.${{ github.run_number }}.apk
+            version.json
+          retention-days: 30
+
+      - name: Create GitHub Release for New Version
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Chill Player APK v1.0.${{ github.run_number }} (Mới nhất)
+          make_latest: true
+          body: |
+            ## 📱 Bản cài đặt Android APK (Chill Player - v1.0.${{ github.run_number }})
+            - **Phiên bản:** `1.0.${{ github.run_number }}` (Mới nhất)
+            - **Chữ ký cố định (Persistent Keystore):** Cài đè trực tiếp mà không cần gỡ bản cũ.
+            - **Tính năng nổi bật:**
+              - 🎬 **Trình phát video & media đỉnh cao (Kế thừa cốt lõi MX Player):** Hỗ trợ MP4, MKV, WebM, HLS m3u8...
+              - 👆 **Cử chỉ vuốt thông minh (Gesture Controls):** Vuốt bên phải chỉnh âm lượng, vuốt bên trái chỉnh độ sáng, vuốt ngang tua video, chạm đúp 10s skip.
+              - 🔊 **Tăng cường âm lượng 200% (Audio Boost) & Bộ cân bằng (Equalizer):** Kích âm lượng to rõ vượt giới hạn loa máy.
+              - 💬 **Hỗ trợ phụ đề đa dạng (.srt, .vtt):** Tùy chỉnh màu sắc, kích thước và căn chỉnh độ trễ thời gian thực (Subtitle Delay Sync).
+              - 🔲 **Picture-in-Picture (PiP) & Phát ngầm:** Vừa xem video thu nhỏ vừa làm việc khác.
+              - 🚫 **100% Không quảng cáo, Không nạp thẻ.**
+              - 🔄 **Tự động cập nhật trực tiếp (In-App Auto Update):** Thông báo và cài đặt bản mới 1 chạm.
+
+            👉 Tải file **`ChillPlayer-v1.0.apk`** hoặc **`ChillPlayer-v1.0.${{ github.run_number }}.apk`** bên dưới để cài đặt trực tiếp vào điện thoại Android.
+          files: |
+            ChillPlayer-v1.0.apk
+            ChillPlayer-v1.0.${{ github.run_number }}.apk
+            version.json
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update latest tag release
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          tag_name: android-apk-latest
+          name: Chill Player Android APK (Mới nhất)
+          make_latest: false
+          files: |
+            ChillPlayer-v1.0.apk
+            ChillPlayer-v1.0.${{ github.run_number }}.apk
+            version.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
