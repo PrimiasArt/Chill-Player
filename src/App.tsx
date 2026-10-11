@@ -9,6 +9,7 @@ import { NetworkStreamModal } from './components/NetworkStreamModal';
 import { SettingsModal } from './components/SettingsModal';
 import { appUpdater } from './services/appUpdater';
 import { vaultService } from './services/vaultService';
+import { backButtonService, useBackButton } from './services/backButton';
 import { Film, Lock, Globe, Settings, Sparkles } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -17,6 +18,24 @@ export const App: React.FC = () => {
   const [activeMedia, setActiveMedia] = useState<MediaItem | null>(null);
   const [isStreamModalOpen, setIsStreamModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+
+  // Initialize hardware back button listener for Android
+  useEffect(() => {
+    backButtonService.init();
+  }, []);
+
+  // Back button handling when modals or vault are active (when player is not active)
+  useBackButton(() => {
+    setIsStreamModalOpen(false);
+  }, isStreamModalOpen && !activeMedia);
+
+  useBackButton(() => {
+    setIsSettingsModalOpen(false);
+  }, isSettingsModalOpen && !activeMedia);
+
+  useBackButton(() => {
+    setCurrentView('library');
+  }, currentView === 'vault' && !activeMedia && !isStreamModalOpen && !isSettingsModalOpen);
 
   // Load items from database
   const refreshItems = async () => {
@@ -36,26 +55,7 @@ export const App: React.FC = () => {
     setTimeout(() => {
       appUpdater.checkForUpdates(false).catch(() => {});
     }, 2000);
-
-    // Android hardware back button handler
-    const handlePopState = () => {
-      if (activeMedia) {
-        if (activeMedia.id.startsWith('vault_')) {
-          vaultService.releaseMemoryUrl(activeMedia.id);
-        }
-        setActiveMedia(null);
-      } else if (isStreamModalOpen) {
-        setIsStreamModalOpen(false);
-      } else if (isSettingsModalOpen) {
-        setIsSettingsModalOpen(false);
-      } else if (currentView === 'vault') {
-        setCurrentView('library');
-      }
-    };
-
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, [activeMedia, isStreamModalOpen, isSettingsModalOpen, currentView]);
+  }, []);
 
   // Handle Play
   const handlePlayMedia = (item: MediaItem) => {

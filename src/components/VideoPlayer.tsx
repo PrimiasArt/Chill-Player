@@ -28,6 +28,9 @@ import Hls from 'hls.js';
 import type { MediaItem, PlayerSettings, AspectRatioMode, SubtitleCue } from '../types';
 import { parseSubtitles, getActiveSubtitleText } from '../services/subtitles';
 import { db } from '../services/db';
+import { useBackButton } from '../services/backButton';
+
+export type ActivePlayerMenu = 'none' | 'more' | 'aspect' | 'speed' | 'subtitles' | 'equalizer' | 'sleep';
 
 interface VideoPlayerProps {
   media: MediaItem;
@@ -58,6 +61,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [duration, setDuration] = useState(media.duration || 0);
   const [isBuffering, setIsBuffering] = useState(true);
   const [isLocked, setIsLocked] = useState(false);
+  const [lockHint, setLockHint] = useState(false);
   const [showControls, setShowControls] = useState(true);
 
   // Gesture indicators
@@ -70,13 +74,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>([]);
   const [activeSubtitle, setActiveSubtitle] = useState<string | null>(null);
 
-  // Modals & Sheets
-  const [showMoreMenu, setShowMoreMenu] = useState(false);
-  const [showSpeedMenu, setShowSpeedMenu] = useState(false);
-  const [showAspectMenu, setShowAspectMenu] = useState(false);
-  const [showSubtitleMenu, setShowSubtitleMenu] = useState(false);
-  const [showEqualizerMenu, setShowEqualizerMenu] = useState(false);
-  const [showSleepTimerMenu, setShowSleepTimerMenu] = useState(false);
+  // Modals & Sheets - Unified Mutually Exclusive Menu State
+  const [activeMenu, setActiveMenu] = useState<ActivePlayerMenu>('none');
+
+  const toggleMenu = (menu: ActivePlayerMenu) => {
+    setActiveMenu(prev => (prev === menu ? 'none' : menu));
+    triggerShowControls();
+  };
+
+  const closeMenu = () => {
+    setActiveMenu('none');
+  };
 
   // Player settings
   const [settings, setSettings] = useState<PlayerSettings>({
@@ -99,8 +107,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const lastTapRef = useRef<{ time: number; x: number } | null>(null);
   const controlsTimeoutRef = useRef<number | null>(null);
   const sleepTimerTimeoutRef = useRef<number | null>(null);
+  const lockHintTimeoutRef = useRef<number | null>(null);
 
-  // Auto-hide controls after 4 seconds
+  // Auto-hide controls after 4.5 seconds
   const triggerShowControls = useCallback(() => {
     setShowControls(true);
     if (controlsTimeoutRef.current) {
@@ -108,14 +117,31 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
     controlsTimeoutRef.current = window.setTimeout(() => {
       setShowControls(false);
-      setShowMoreMenu(false);
-      setShowSpeedMenu(false);
-      setShowAspectMenu(false);
-      setShowSubtitleMenu(false);
-      setShowEqualizerMenu(false);
-      setShowSleepTimerMenu(false);
+      setActiveMenu('none');
     }, 4500);
   }, []);
+
+  // Hardware Back Button Handlers (Hierarchical Priority)
+  // 1. If screen is locked, do not exit: show unlock hint toast
+  useBackButton(() => {
+    setLockHint(true);
+    if (lockHintTimeoutRef.current) clearTimeout(lockHintTimeoutRef.current);
+    lockHintTimeoutRef.current = window.setTimeout(() => setLockHint(false), 2500);
+    triggerShowControls();
+    return true;
+  }, isLocked);
+
+  // 2. If a popup menu is active, back closes the menu first without closing player
+  useBackButton(() => {
+    setActiveMenu('none');
+    return true;
+  }, !isLocked && activeMenu !== 'none');
+
+  // 3. If unlocked and no menu is open, back closes player and returns to library/vault
+  useBackButton(() => {
+    onBack();
+    return true;
+  }, !isLocked && activeMenu === 'none');
 
   // Format seconds to mm:ss or hh:mm:ss
   const formatTime = (seconds: number) => {
@@ -379,6 +405,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const handleGesturePointerUp = () => {
     if (isLocked) {
+      setLockHint(true);
+      if (lockHintTimeoutRef.current) clearTimeout(lockHintTimeoutRef.current);
+      lockHintTimeoutRef.current = window.setTimeout(() => setLockHint(false), 2500);
       triggerShowControls();
       return;
     }
@@ -573,24 +602,38 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
-      {/* Screen Lock Button (Floating Top-Left) */}
+      {/* Screen Lock Button (Vertically Centered on Left Edge - Standard MX Player Pattern) */}
       <button
         onClick={(e) => {
           e.stopPropagation();
-          setIsLocked(!isLocked);
+          const nextLocked = !isLocked;
+          setIsLocked(nextLocked);
+          if (nextLocked) {
+            setActiveMenu('none');
+          }
           triggerShowControls();
         }}
-        className={`absolute top-4 left-4 z-50 p-2.5 rounded-full transition-all cursor-pointer ${
+        className={`absolute left-4 sm:left-6 top-1/2 -translate-y-1/2 z-50 p-3 rounded-full transition-all cursor-pointer ${
           isLocked 
-            ? 'bg-amber-400 text-zinc-950 shadow-[0_0_25px_rgba(251,191,36,0.6)] scale-105' 
+            ? 'bg-amber-400 text-zinc-950 shadow-[0_0_30px_rgba(251,191,36,0.8)] scale-110 ring-4 ring-amber-400/30' 
             : showControls 
-              ? 'vision-btn-circle text-zinc-200 hover:text-white' 
+              ? 'vision-btn-circle text-zinc-200 hover:text-white backdrop-blur-md' 
               : 'opacity-0 pointer-events-none'
         }`}
         title={isLocked ? 'Mở khóa màn hình' : 'Khóa cử chỉ màn hình'}
       >
-        {isLocked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+        {isLocked ? <Lock className="w-5 h-5 text-zinc-950" /> : <Unlock className="w-4 h-4" />}
       </button>
+
+      {/* Screen Locked Hint Toast */}
+      {lockHint && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 px-5 py-3 rounded-full vision-capsule border border-amber-400/50 shadow-[0_0_35px_rgba(251,191,36,0.4)] flex items-center gap-2.5 animate-in fade-in zoom-in-95 pointer-events-none">
+          <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+          <span className="text-xs font-semibold text-white tracking-wide">
+            Màn hình đang khóa. Chạm ổ khóa vàng bên trái để mở khóa.
+          </span>
+        </div>
+      )}
 
       {/* 6. Controls Overlay (Clean, Responsive, Non-blocking) */}
       {showControls && !isLocked && (
@@ -600,10 +643,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             <div className="flex items-center gap-2.5 min-w-0 pr-2">
               <button 
                 onClick={onBack}
-                className="w-8 h-8 rounded-full vision-btn-circle text-zinc-300 hover:text-white flex items-center justify-center cursor-pointer shrink-0"
+                className="w-9 h-9 rounded-full vision-btn-circle text-zinc-200 hover:text-white hover:bg-white/20 active:scale-95 flex items-center justify-center cursor-pointer shrink-0 transition-all"
                 title="Quay lại thư viện"
               >
-                <ChevronLeft className="w-4 h-4" />
+                <ChevronLeft className="w-5 h-5" />
               </button>
               <div className="min-w-0">
                 <h2 className="text-xs font-bold text-white truncate max-w-[150px] sm:max-w-xs md:max-w-md">
@@ -626,9 +669,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             {/* Top Bar Actions */}
             <div className="flex items-center gap-1.5 shrink-0">
               <button
-                onClick={() => setShowAspectMenu(!showAspectMenu)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleMenu('aspect');
+                }}
                 className={`w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer ${
-                  showAspectMenu ? 'bg-emerald-500 text-zinc-950 font-bold' : 'vision-btn-circle text-zinc-300 hover:text-white'
+                  activeMenu === 'aspect' ? 'bg-emerald-500 text-zinc-950 font-bold shadow-md shadow-emerald-500/30' : 'vision-btn-circle text-zinc-300 hover:text-white'
                 }`}
                 title="Tỉ lệ khung hình"
               >
@@ -644,9 +690,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               </button>
 
               <button
-                onClick={() => setShowMoreMenu(!showMoreMenu)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleMenu('more');
+                }}
                 className={`w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer ${
-                  showMoreMenu ? 'bg-emerald-500 text-zinc-950 font-bold' : 'vision-btn-circle text-zinc-300 hover:text-white'
+                  activeMenu === 'more' ? 'bg-emerald-500 text-zinc-950 font-bold shadow-md shadow-emerald-500/30' : 'vision-btn-circle text-zinc-300 hover:text-white'
                 }`}
                 title="Cài đặt phát & Âm thanh"
               >
@@ -749,9 +798,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 </button>
 
                 <button
-                  onClick={() => setShowSleepTimerMenu(!showSleepTimerMenu)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleMenu('sleep');
+                  }}
                   className={`flex items-center gap-1 hover:text-white transition-colors cursor-pointer text-xs ${
-                    settings.sleepTimerMinutes ? 'text-amber-400 font-semibold' : ''
+                    settings.sleepTimerMinutes || activeMenu === 'sleep' ? 'text-amber-400 font-semibold' : ''
                   }`}
                 >
                   <Moon className="w-3.5 h-3.5" />
@@ -779,25 +831,33 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
+      {/* Backdrop to dismiss any open menu on outside click */}
+      {activeMenu !== 'none' && (
+        <div 
+          onClick={(e) => {
+            e.stopPropagation();
+            setActiveMenu('none');
+          }}
+          className="absolute inset-0 z-45 bg-black/35 backdrop-blur-[2px] transition-all"
+        />
+      )}
+
       {/* 7. Unified visionOS "More Options" Sheet */}
-      {showMoreMenu && (
+      {activeMenu === 'more' && (
         <div 
           onClick={(e) => e.stopPropagation()}
           className="absolute top-16 right-4 sm:right-10 z-50 p-4 rounded-3xl vision-glass border border-white/20 shadow-[0_25px_60px_rgba(0,0,0,0.8)] flex flex-col gap-2 min-w-56 animate-in fade-in zoom-in-95 pointer-events-auto"
         >
           <div className="flex items-center justify-between text-xs font-bold text-white border-b border-white/10 pb-2 mb-1">
             <span>Tùy chọn phát</span>
-            <button onClick={() => setShowMoreMenu(false)} className="text-zinc-400 hover:text-white">
+            <button onClick={() => setActiveMenu('none')} className="text-zinc-400 hover:text-white cursor-pointer p-1">
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
 
           <button
-            onClick={() => {
-              setShowMoreMenu(false);
-              setShowSpeedMenu(true);
-            }}
-            className="flex items-center justify-between px-3 py-2 rounded-2xl hover:bg-white/10 text-xs text-zinc-200 transition-colors"
+            onClick={() => setActiveMenu('speed')}
+            className="flex items-center justify-between px-3 py-2 rounded-2xl hover:bg-white/10 text-xs text-zinc-200 transition-colors cursor-pointer"
           >
             <span className="flex items-center gap-2">
               <Gauge className="w-3.5 h-3.5 text-emerald-400" />
@@ -807,11 +867,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           </button>
 
           <button
-            onClick={() => {
-              setShowMoreMenu(false);
-              setShowEqualizerMenu(true);
-            }}
-            className="flex items-center justify-between px-3 py-2 rounded-2xl hover:bg-white/10 text-xs text-zinc-200 transition-colors"
+            onClick={() => setActiveMenu('equalizer')}
+            className="flex items-center justify-between px-3 py-2 rounded-2xl hover:bg-white/10 text-xs text-zinc-200 transition-colors cursor-pointer"
           >
             <span className="flex items-center gap-2">
               <Sliders className="w-3.5 h-3.5 text-emerald-400" />
@@ -821,11 +878,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           </button>
 
           <button
-            onClick={() => {
-              setShowMoreMenu(false);
-              setShowSubtitleMenu(true);
-            }}
-            className="flex items-center justify-between px-3 py-2 rounded-2xl hover:bg-white/10 text-xs text-zinc-200 transition-colors"
+            onClick={() => setActiveMenu('subtitles')}
+            className="flex items-center justify-between px-3 py-2 rounded-2xl hover:bg-white/10 text-xs text-zinc-200 transition-colors cursor-pointer"
           >
             <span className="flex items-center gap-2">
               <Subtitles className="w-3.5 h-3.5 text-emerald-400" />
@@ -837,18 +891,23 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       )}
 
       {/* Aspect Ratio Modal Menu */}
-      {showAspectMenu && (
+      {activeMenu === 'aspect' && (
         <div 
           onClick={(e) => e.stopPropagation()}
-          className="absolute top-16 right-4 sm:right-10 z-50 p-2.5 rounded-3xl vision-glass border border-white/20 shadow-[0_25px_60px_rgba(0,0,0,0.8)] flex flex-col gap-1 min-w-44 animate-in fade-in zoom-in-95 pointer-events-auto"
+          className="absolute top-16 right-4 sm:right-10 z-50 p-3 rounded-3xl vision-glass border border-white/20 shadow-[0_25px_60px_rgba(0,0,0,0.8)] flex flex-col gap-1 min-w-48 animate-in fade-in zoom-in-95 pointer-events-auto"
         >
-          <div className="text-[10px] font-bold text-zinc-400 px-3 py-1 uppercase tracking-wider font-sans">Tỉ lệ khung hình</div>
+          <div className="flex items-center justify-between text-xs font-bold text-white border-b border-white/10 pb-2 mb-1 px-1">
+            <span className="text-[11px] font-bold text-zinc-200 uppercase tracking-wider font-sans">Tỉ lệ khung hình</span>
+            <button onClick={() => setActiveMenu('none')} className="text-zinc-400 hover:text-white cursor-pointer p-0.5">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
           {(['fit', 'fill', 'stretch', '16:9', '4:3', 'original'] as AspectRatioMode[]).map((mode) => (
             <button
               key={mode}
               onClick={() => {
                 setSettings(prev => ({ ...prev, aspectRatio: mode }));
-                setShowAspectMenu(false);
+                setActiveMenu('none');
               }}
               className={`px-3.5 py-1.5 rounded-2xl text-left text-xs font-semibold flex items-center justify-between cursor-pointer transition-all ${
                 settings.aspectRatio === mode ? 'bg-emerald-500 text-zinc-950 font-bold shadow-md shadow-emerald-500/20' : 'text-zinc-200 hover:bg-white/10'
@@ -862,12 +921,23 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       )}
 
       {/* Speed Modal Menu */}
-      {showSpeedMenu && (
+      {activeMenu === 'speed' && (
         <div 
           onClick={(e) => e.stopPropagation()}
-          className="absolute top-16 right-4 sm:right-10 z-50 p-2.5 rounded-3xl vision-glass border border-white/20 shadow-[0_25px_60px_rgba(0,0,0,0.8)] flex flex-col gap-1 min-w-36 animate-in fade-in zoom-in-95 pointer-events-auto"
+          className="absolute top-16 right-4 sm:right-10 z-50 p-3 rounded-3xl vision-glass border border-white/20 shadow-[0_25px_60px_rgba(0,0,0,0.8)] flex flex-col gap-1 min-w-44 animate-in fade-in zoom-in-95 pointer-events-auto"
         >
-          <div className="text-[10px] font-bold text-zinc-400 px-3 py-1 uppercase tracking-wider font-sans">Tốc độ phát</div>
+          <div className="flex items-center justify-between text-xs font-bold text-white border-b border-white/10 pb-1.5 mb-1 px-1">
+            <button 
+              onClick={() => setActiveMenu('more')} 
+              className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-white cursor-pointer"
+            >
+              <ChevronLeft className="w-3 h-3" />
+              <span>Quay lại</span>
+            </button>
+            <button onClick={() => setActiveMenu('none')} className="text-zinc-400 hover:text-white cursor-pointer p-0.5">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
           {[0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0].map((rate) => (
             <button
               key={rate}
@@ -876,7 +946,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   videoRef.current.playbackRate = rate;
                 }
                 setSettings(prev => ({ ...prev, playbackRate: rate }));
-                setShowSpeedMenu(false);
+                setActiveMenu('none');
               }}
               className={`px-3.5 py-1.5 rounded-2xl text-left text-xs font-semibold flex items-center justify-between cursor-pointer transition-all ${
                 settings.playbackRate === rate ? 'bg-emerald-500 text-zinc-950 font-bold shadow-md shadow-emerald-500/20' : 'text-zinc-200 hover:bg-white/10'
@@ -890,14 +960,25 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       )}
 
       {/* Subtitles Menu */}
-      {showSubtitleMenu && (
+      {activeMenu === 'subtitles' && (
         <div 
           onClick={(e) => e.stopPropagation()}
           className="absolute top-16 right-4 sm:right-10 z-50 p-4 rounded-3xl vision-glass border border-white/20 shadow-[0_25px_60px_rgba(0,0,0,0.8)] flex flex-col gap-3 min-w-64 max-w-xs animate-in fade-in zoom-in-95 pointer-events-auto"
         >
-          <div className="text-xs font-bold text-white flex items-center justify-between">
-            <span>Cài đặt phụ đề</span>
-            <span className="text-[10px] text-zinc-400 font-normal">{subtitleCues.length} câu</span>
+          <div className="flex items-center justify-between text-xs font-bold text-white border-b border-white/10 pb-1.5">
+            <button 
+              onClick={() => setActiveMenu('more')} 
+              className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-white cursor-pointer"
+            >
+              <ChevronLeft className="w-3 h-3" />
+              <span>Quay lại</span>
+            </button>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-zinc-400 font-normal">{subtitleCues.length} câu</span>
+              <button onClick={() => setActiveMenu('none')} className="text-zinc-400 hover:text-white cursor-pointer p-0.5">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
 
           <div>
@@ -952,14 +1033,25 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       )}
 
       {/* Equalizer & Audio Boost Menu */}
-      {showEqualizerMenu && (
+      {activeMenu === 'equalizer' && (
         <div 
           onClick={(e) => e.stopPropagation()}
-          className="absolute top-16 right-4 sm:right-10 z-50 p-4 rounded-3xl vision-glass border border-white/20 shadow-[0_25px_60px_rgba(0,0,0,0.8)] flex flex-col gap-3 min-w-60 animate-in fade-in zoom-in-95 pointer-events-auto"
+          className="absolute top-16 right-4 sm:right-10 z-50 p-4 rounded-3xl vision-glass border border-white/20 shadow-[0_25px_60px_rgba(0,0,0,0.8)] flex flex-col gap-3 min-w-64 animate-in fade-in zoom-in-95 pointer-events-auto"
         >
-          <div className="text-xs font-bold text-white flex items-center justify-between">
-            <span>Equalizer & Kích âm</span>
-            <Zap className="w-3.5 h-3.5 text-amber-400" />
+          <div className="flex items-center justify-between text-xs font-bold text-white border-b border-white/10 pb-1.5">
+            <button 
+              onClick={() => setActiveMenu('more')} 
+              className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-white cursor-pointer"
+            >
+              <ChevronLeft className="w-3 h-3" />
+              <span>Quay lại</span>
+            </button>
+            <div className="flex items-center gap-2">
+              <Zap className="w-3.5 h-3.5 text-amber-400" />
+              <button onClick={() => setActiveMenu('none')} className="text-zinc-400 hover:text-white cursor-pointer p-0.5">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
 
           <div className="space-y-1">
@@ -1005,20 +1097,25 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       )}
 
       {/* Sleep Timer Menu */}
-      {showSleepTimerMenu && (
+      {activeMenu === 'sleep' && (
         <div 
           onClick={(e) => e.stopPropagation()}
-          className="absolute bottom-24 left-6 z-50 p-2.5 rounded-3xl vision-glass border border-white/20 shadow-[0_25px_60px_rgba(0,0,0,0.8)] flex flex-col gap-1 min-w-40 animate-in fade-in zoom-in-95 pointer-events-auto"
+          className="absolute bottom-24 left-6 z-50 p-3 rounded-3xl vision-glass border border-white/20 shadow-[0_25px_60px_rgba(0,0,0,0.8)] flex flex-col gap-1 min-w-44 animate-in fade-in zoom-in-95 pointer-events-auto"
         >
-          <div className="text-[10px] font-bold text-zinc-400 px-3 py-1 uppercase tracking-wider font-sans">Hẹn giờ tắt</div>
+          <div className="flex items-center justify-between text-xs font-bold text-white border-b border-white/10 pb-1.5 mb-1 px-1">
+            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider font-sans">Hẹn giờ tắt</span>
+            <button onClick={() => setActiveMenu('none')} className="text-zinc-400 hover:text-white cursor-pointer p-0.5">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
           {[null, 15, 30, 45, 60].map((mins) => (
             <button
               key={mins || 0}
               onClick={() => {
                 setSettings(prev => ({ ...prev, sleepTimerMinutes: mins }));
-                setShowSleepTimerMenu(false);
+                setActiveMenu('none');
               }}
-              className={`px-3 py-1.5 rounded-2xl text-left text-xs font-semibold flex items-center justify-between cursor-pointer transition-all ${
+              className={`px-3.5 py-1.5 rounded-2xl text-left text-xs font-semibold flex items-center justify-between cursor-pointer transition-all ${
                 settings.sleepTimerMinutes === mins ? 'bg-emerald-500 text-zinc-950 font-bold shadow-md shadow-emerald-500/20' : 'text-zinc-200 hover:bg-white/10'
               }`}
             >
