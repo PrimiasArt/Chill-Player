@@ -189,12 +189,21 @@ class VaultService {
   async moveItemToVault(mediaItem: MediaItem): Promise<boolean> {
     if (!this.activeKey) throw new Error('Vault is locked');
     try {
-      let blob: Blob;
+      let blob: Blob | undefined;
       if (mediaItem.fileBlob) {
         blob = mediaItem.fileBlob;
       } else {
-        const response = await fetch(mediaItem.url);
-        blob = await response.blob();
+        const blobRecord = await db.mediaBlobs.get(mediaItem.id);
+        if (blobRecord && blobRecord.blob) {
+          blob = blobRecord.blob;
+        } else if (mediaItem.url) {
+          const response = await fetch(mediaItem.url);
+          blob = await response.blob();
+        }
+      }
+
+      if (!blob) {
+        throw new Error('Could not locate media blob to move to vault');
       }
 
       await this.encryptAndStoreFile(
@@ -204,8 +213,11 @@ class VaultService {
         mediaItem.duration
       );
 
-      // Permanently remove from normal public library
-      await db.mediaItems.delete(mediaItem.id);
+      // Permanently remove from normal public library and blob storage
+      await Promise.all([
+        db.mediaItems.delete(mediaItem.id),
+        db.mediaBlobs.delete(mediaItem.id)
+      ]);
       return true;
     } catch (e) {
       console.error('Failed to move item to vault:', e);
@@ -306,14 +318,19 @@ class VaultService {
         ? `video/${vaultItem.format === 'mkv' ? 'x-matroska' : vaultItem.format}` 
         : `audio/${vaultItem.format}`;
       const decryptedBlob = new Blob([decryptedBuffer], { type: mime });
-      const url = URL.createObjectURL(decryptedBlob);
+      const restoredId = `local_${Date.now()}_restored`;
 
-      // Create regular MediaItem with persisted fileBlob
+      // Store binary blob in dedicated mediaBlobs table
+      await db.mediaBlobs.put({
+        id: restoredId,
+        blob: decryptedBlob
+      });
+
+      // Create regular MediaItem
       const restoredItem: MediaItem = {
-        id: `local_${Date.now()}_restored`,
+        id: restoredId,
         title: vaultItem.title,
-        url,
-        fileBlob: decryptedBlob,
+        url: '',
         type: vaultItem.type,
         duration: vaultItem.duration,
         currentTime: 0,

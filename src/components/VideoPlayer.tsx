@@ -203,7 +203,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       if (Hls.isSupported()) {
         const hls = new Hls({
           enableWorker: true,
-          lowLatencyMode: true
+          lowLatencyMode: true,
+          maxBufferLength: 30,
+          maxMaxBufferLength: 60,
+          backBufferLength: 30
         });
         hlsRef.current = hls;
         hls.loadSource(media.url);
@@ -213,7 +216,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           if (media.currentTime > 0) {
             video.currentTime = media.currentTime;
           }
-          video.play().catch(() => {});
+          video.play().catch(() => {
+            setIsBuffering(false);
+            setIsPlaying(false);
+          });
         });
         hls.on(Hls.Events.ERROR, () => {
           setIsBuffering(false);
@@ -223,14 +229,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         if (media.currentTime > 0) {
           video.currentTime = media.currentTime;
         }
-        video.play().catch(() => {});
+        video.play().catch(() => {
+          setIsBuffering(false);
+          setIsPlaying(false);
+        });
       }
     } else {
       video.src = media.url;
+      video.load();
       if (media.currentTime > 0) {
         video.currentTime = media.currentTime;
       }
-      video.play().catch(() => {});
+      video.play().catch(() => {
+        setIsBuffering(false);
+        setIsPlaying(false);
+      });
     }
 
     triggerShowControls();
@@ -314,6 +327,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const handleLoadedMetadata = () => {
     if (!videoRef.current) return;
     setDuration(videoRef.current.duration);
+    if (media.currentTime > 0 && Math.abs(videoRef.current.currentTime - media.currentTime) > 1) {
+      videoRef.current.currentTime = media.currentTime;
+    }
     setIsBuffering(false);
   };
 
@@ -496,6 +512,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         preload="auto"
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
+        onLoadedData={() => setIsBuffering(false)}
+        onCanPlay={() => setIsBuffering(false)}
+        onCanPlayThrough={() => setIsBuffering(false)}
         onWaiting={() => setIsBuffering(true)}
         onPlaying={() => {
           setIsBuffering(false);
@@ -503,6 +522,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }}
         onPause={() => setIsPlaying(false)}
         onEnded={handleEnded}
+        onError={() => {
+          setIsBuffering(false);
+          setIsPlaying(false);
+        }}
         style={getAspectRatioStyle()}
         className="max-w-full max-h-full transition-all duration-200"
       />

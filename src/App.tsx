@@ -10,6 +10,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { appUpdater } from './services/appUpdater';
 import { vaultService } from './services/vaultService';
 import { backButtonService, useBackButton } from './services/backButton';
+import { mediaService } from './services/mediaService';
 import { Film, Lock, Globe, Settings, Sparkles } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -37,19 +38,19 @@ export const App: React.FC = () => {
     setCurrentView('library');
   }, currentView === 'vault' && !activeMedia && !isStreamModalOpen && !isSettingsModalOpen);
 
-  // Load items from database
+  // Load items from database (Ultra fast metadata query without loading heavy blobs)
   const refreshItems = async () => {
-    const list = await db.mediaItems.orderBy('lastPlayedAt').reverse().toArray();
-    list.forEach(item => {
-      if (item.fileBlob) {
-        item.url = URL.createObjectURL(item.fileBlob);
-      }
-    });
+    const list = await mediaService.getMediaList();
     setMediaItems(list);
   };
 
   useEffect(() => {
-    refreshItems();
+    refreshItems().then(() => {
+      // Lazily backfill missing thumbnails in the background
+      mediaService.backfillMissingThumbnails().then(() => {
+        refreshItems();
+      });
+    });
 
     // Check updates in background on launch
     setTimeout(() => {
@@ -57,31 +58,45 @@ export const App: React.FC = () => {
     }, 2000);
   }, []);
 
-  // Handle Play
-  const handlePlayMedia = (item: MediaItem) => {
-    setActiveMedia(item);
+  // Handle Play (Resolves lazy blob on demand)
+  const handlePlayMedia = async (item: MediaItem) => {
+    const playUrl = await mediaService.getPlayableUrl(item);
+    setActiveMedia({
+      ...item,
+      url: playUrl
+    });
   };
 
   // Next / Previous in list
-  const handleNextMedia = () => {
+  const handleNextMedia = async () => {
     if (!activeMedia || mediaItems.length === 0) return;
     const idx = mediaItems.findIndex(m => m.id === activeMedia.id);
     if (idx !== -1 && idx < mediaItems.length - 1) {
-      setActiveMedia(mediaItems[idx + 1]);
+      if (activeMedia.url.startsWith('blob:') && !activeMedia.id.startsWith('vault_')) {
+        mediaService.revokePlayableUrl(activeMedia.url);
+      }
+      await handlePlayMedia(mediaItems[idx + 1]);
     }
   };
 
-  const handlePrevMedia = () => {
+  const handlePrevMedia = async () => {
     if (!activeMedia || mediaItems.length === 0) return;
     const idx = mediaItems.findIndex(m => m.id === activeMedia.id);
     if (idx > 0) {
-      setActiveMedia(mediaItems[idx - 1]);
+      if (activeMedia.url.startsWith('blob:') && !activeMedia.id.startsWith('vault_')) {
+        mediaService.revokePlayableUrl(activeMedia.url);
+      }
+      await handlePlayMedia(mediaItems[idx - 1]);
     }
   };
 
   const handleClosePlayer = () => {
-    if (activeMedia && activeMedia.id.startsWith('vault_')) {
-      vaultService.releaseMemoryUrl(activeMedia.id);
+    if (activeMedia) {
+      if (activeMedia.id.startsWith('vault_')) {
+        vaultService.releaseMemoryUrl(activeMedia.id);
+      } else if (activeMedia.url.startsWith('blob:')) {
+        mediaService.revokePlayableUrl(activeMedia.url);
+      }
     }
     setActiveMedia(null);
     refreshItems();
